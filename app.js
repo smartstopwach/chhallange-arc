@@ -68,6 +68,12 @@
     { id: 'rough', label: 'Rough', icon: 'mind' },
   ];
   const TIMER_PRESETS = [15, 25, 45];
+  const PLAN_SLOTS = [
+    { value: 'Morning', icon: 'sunrise', range: 'Start gently' },
+    { value: 'Afternoon', icon: 'target', range: 'Midday momentum' },
+    { value: 'Evening', icon: 'moon', range: 'Wind down well' },
+    { value: 'Anytime', icon: 'clock', range: 'Whenever it fits' },
+  ];
   const WEEKDAYS = [
     { value: 1, label: 'M' }, { value: 2, label: 'T' }, { value: 3, label: 'W' },
     { value: 4, label: 'T' }, { value: 5, label: 'F' }, { value: 6, label: 'S' }, { value: 0, label: 'S' },
@@ -85,6 +91,7 @@
     play: '<path d="m8 5 12 7-12 7V5Z"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
     arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+    'arrow-left': '<path d="M19 12H5m6 6-6-6 6-6"/>',
     'arrow-up-right': '<path d="M7 17 17 7M8 7h9v9"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 9"/>',
@@ -252,7 +259,8 @@
         if (!isRecord(goal)) return null;
         const text = String(goal.text || '').trim().slice(0, 150);
         if (!text) return null;
-        return { id: String(goal.id || `goal-${index}-${randomId()}`).slice(0, 100), text, done: goal.done === true };
+        const slot = PLAN_SLOTS.some((item) => item.value === goal.slot) ? goal.slot : 'Anytime';
+        return { id: String(goal.id || `goal-${index}-${randomId()}`).slice(0, 100), text, done: goal.done === true, slot };
       }).filter(Boolean);
     });
     return goals;
@@ -504,7 +512,7 @@
       else button.removeAttribute('aria-current');
     });
     const breadcrumb = document.getElementById('breadcrumb-current');
-    if (breadcrumb) breadcrumb.textContent = ({ today: 'Today', habits: 'Habits', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today';
+    if (breadcrumb) breadcrumb.textContent = ({ today: 'Today', habits: 'Habits', planner: 'Planner', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today';
     const topDate = document.getElementById('top-date');
     if (topDate) topDate.textContent = compactDate(new Date());
     const profileName = document.getElementById('profile-name');
@@ -529,13 +537,14 @@
     const pages = {
       today: renderTodayView,
       habits: renderHabitsView,
+      planner: renderPlannerView,
       challenges: renderChallengesView,
       insights: renderInsightsView,
       settings: renderSettingsView,
     };
     host.innerHTML = (pages[currentView] || renderTodayView)();
     renderNav();
-    document.title = `${({ today: 'Today', habits: 'Habits', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today'} · Daymark`;
+    document.title = `${({ today: 'Today', habits: 'Habits', planner: 'Planner', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today'} · Daymark`;
   }
 
   function ringMarkup(percent, size, className, centerMarkup) {
@@ -711,20 +720,58 @@
     return `<section class="card mood-card" aria-labelledby="mood-card-title"><div class="mood-layout"><div class="mood-intro"><p class="card-overline">A MOMENT FOR YOU</p><h2 id="mood-card-title">How are you,<br/><span>really?</span></h2><p>No score, no streak. Just a small space to notice how today feels.</p><span class="mood-privacy-note">${icon('lock', 12)} Only saved on this device</span></div><div class="mood-content"><div class="mood-choices" role="group" aria-label="Choose your mood">${moodOptions}</div><form data-form="reflection" class="reflection-form"><label class="form-label" for="reflection-note">A note to yourself <span>optional</span></label><textarea id="reflection-note" class="form-control reflection-input" name="note" maxlength="280" placeholder="What is on your mind today?">${escapeHtml(note || '')}</textarea><div class="reflection-footer"><span id="mood-selection-status" aria-live="polite">${escapeHtml(status)}</span><button class="button button-secondary button-small" type="submit">Save check-in ${icon('check', 13)}</button></div></form></div></div></section>`;
   }
 
+  function renderGoalRow(goal, dayKey, options = {}) {
+    const slotPill = options.showSlot !== false && goal.slot && goal.slot !== 'Anytime'
+      ? `<span class="goal-time-pill">${escapeHtml(goal.slot)}</span>`
+      : '';
+    return `<li class="goal-row${goal.done ? ' is-done' : ''}${options.planner ? ' planner-goal-row' : ''}"><button class="check-toggle${goal.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${goal.done}" aria-label="${goal.done ? 'Mark incomplete' : 'Complete'} ${escapeHtml(goal.text)}" data-action="toggle-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('check', 13)}</button><span class="goal-text">${escapeHtml(goal.text)}</span>${slotPill}<button class="icon-button goal-delete" type="button" aria-label="Remove goal ${escapeHtml(goal.text)}" data-action="delete-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('close', 14)}</button></li>`;
+  }
+
   function renderTomorrowCard() {
     const tomorrow = getTomorrowDate();
     const key = dateKey(tomorrow);
     const goals = state.goals[key] || [];
+    const focus = state.focus[key];
     const completed = goals.filter((goal) => goal.done).length;
     const goalRows = goals.length
-      ? `<ul class="goal-list">${goals.map((goal) => `<li class="goal-row${goal.done ? ' is-done' : ''}"><button class="check-toggle${goal.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${goal.done}" aria-label="${goal.done ? 'Mark incomplete' : 'Complete'} ${escapeHtml(goal.text)}" data-action="toggle-goal" data-day="${key}" data-id="${escapeHtml(goal.id)}">${icon('check', 13)}</button><span class="goal-text">${escapeHtml(goal.text)}</span><button class="icon-button goal-delete" type="button" aria-label="Remove goal ${escapeHtml(goal.text)}" data-action="delete-goal" data-day="${key}" data-id="${escapeHtml(goal.id)}">${icon('close', 14)}</button></li>`).join('')}</ul>`
+      ? `<ul class="goal-list">${goals.map((goal) => renderGoalRow(goal, key)).join('')}</ul>`
       : `<div class="goal-empty"><span class="goal-empty-icon">${icon('sparkles', 15)}</span><span><strong>A softer start begins here.</strong><br>Add one small thing you would like to do tomorrow.</span></div>`;
     return `<section class="card tomorrow-card" aria-labelledby="tomorrow-title">
       <div class="tomorrow-layout">
-        <div class="tomorrow-intro"><div class="tomorrow-date">${icon('calendar', 14)} ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }))}</div><h2 id="tomorrow-title">Plan for tomorrow</h2><p>Leave a little note for your future self. Keep it kind, clear, and doable.</p><div class="tomorrow-progress">${icon('check-circle', 14)}<span>${goals.length ? `${completed} of ${goals.length} goal${goals.length === 1 ? '' : 's'} checked off` : 'No pressure. One goal is a great start.'}</span></div></div>
+        <div class="tomorrow-intro"><div class="tomorrow-date">${icon('calendar', 14)} ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }))}</div><h2 id="tomorrow-title">Plan for tomorrow</h2><p>Leave a little note for your future self. Keep it kind, clear, and doable.</p><div class="tomorrow-progress">${icon('check-circle', 14)}<span>${goals.length ? `${completed} of ${goals.length} goal${goals.length === 1 ? '' : 's'} checked off` : 'No pressure. One goal is a great start.'}</span></div><div class="tomorrow-priority-preview"><span>${icon('target', 14)}</span><span><small>TOP PRIORITY</small><strong>${focus ? escapeHtml(focus.text) : 'Not set yet'}</strong></span></div><button class="button-link planner-open-link" type="button" data-view="planner">Open full planner ${icon('arrow', 13)}</button></div>
         <div class="tomorrow-content">${goalRows}<form class="inline-form goal-form" data-form="goal"><input class="inline-input" type="text" name="goal" maxlength="150" required autocomplete="off" placeholder="Add a small, doable goal…" aria-label="Add a goal for tomorrow"/><button class="inline-submit" type="submit" aria-label="Add goal for tomorrow">${icon('plus', 16)}</button></form></div>
       </div>
     </section>`;
+  }
+
+  function renderPlannerView() {
+    const tomorrow = getTomorrowDate();
+    const key = dateKey(tomorrow);
+    const goals = state.goals[key] || [];
+    const priority = state.focus[key];
+    const habits = scheduledHabitsOn(key);
+    const completed = goals.filter((goal) => goal.done).length;
+    const plannedSlots = new Set(goals.map((goal) => goal.slot || 'Anytime')).size;
+    const slotOptions = PLAN_SLOTS.map((slot) => `<option value="${slot.value}">${slot.value}</option>`).join('');
+    const blocks = PLAN_SLOTS.map((slot) => {
+      const slotGoals = goals.filter((goal) => (goal.slot || 'Anytime') === slot.value);
+      const tasks = slotGoals.length
+        ? `<ul class="planner-goal-list">${slotGoals.map((goal) => renderGoalRow(goal, key, { planner: true, showSlot: false })).join('')}</ul>`
+        : `<p class="planner-block-empty">Nothing planned here yet.</p>`;
+      return `<section class="planner-time-block"><div class="planner-block-heading"><span class="planner-block-icon">${icon(slot.icon, 17)}</span><span class="planner-block-title"><strong>${slot.value}</strong><small>${slot.range}</small></span><span class="planner-block-count">${slotGoals.length}</span></div>${tasks}</section>`;
+    }).join('');
+    const habitsContent = habits.length
+      ? `<ul class="planner-habit-list">${habits.map((habit) => `<li><span class="habit-symbol tone-${getHabitIcon(habit)}">${icon(getHabitIcon(habit), 16)}</span><span><strong>${escapeHtml(habit.name)}</strong><small>${escapeHtml(habit.time)} · ${escapeHtml(habit.category)}</small></span></li>`).join('')}</ul>`
+      : `<div class="planner-rest-note">${icon('moon', 16)}<span>No habits scheduled. Tomorrow is a planned rest day.</span></div>`;
+    return `<div class="planner-view">
+      <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">TOMORROW · ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase())}</p><h1>Give tomorrow<br/><span>a head start.</span></h1><p>Choose one priority, place a few tasks into your day, and let the rest wait.</p></div><div class="page-intro-action"><button class="button button-secondary" type="button" data-view="today">${icon('arrow-left', 15)} Back to today</button></div></header>
+      <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : 'A roomier day is planned', 'check-circle', 'blue')}${renderStatCard('Dayparts planned', String(plannedSlots), 'blocks', plannedSlots ? 'Your day has a shape' : 'No schedule pressure', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
+      <div class="planner-layout"><div class="planner-sidebar">
+        <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
+        <section class="card planner-habits-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div><p class="card-overline">ALREADY IN YOUR ROUTINE</p><h2>Habits due tomorrow</h2></div></div><p class="planner-card-copy">Your scheduled habits are included automatically.</p>${habitsContent}</section>
+      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">A GENTLE SHAPE FOR THE DAY</p><h2>Tomorrow, at a glance</h2><p>Drop tasks into a part of the day. Move them or change your mind any time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-time-blocks">${blocks}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a small, doable task…"/><label class="sr-only" for="planner-slot-input">Choose when to do it</label><select class="form-control" id="planner-slot-input" name="slot">${slotOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
+      <p class="page-footnote">Plans are suggestions, not rules. Tomorrow can change—and so can this plan.</p>
+    </div>`;
   }
 
   function renderTodayView() {
@@ -1172,8 +1219,10 @@
       const text = String(formData.get('goal') || '').trim().slice(0, 150);
       if (!text) return;
       const key = dateKey(getTomorrowDate());
+      const selectedSlot = formData.get('slot');
+      const slot = PLAN_SLOTS.some((item) => item.value === selectedSlot) ? selectedSlot : 'Anytime';
       if (!Array.isArray(state.goals[key])) state.goals[key] = [];
-      state.goals[key].push({ id: randomId(), text, done: false });
+      state.goals[key].push({ id: randomId(), text, done: false, slot });
       saveState();
       renderApp();
       showToast('Added to tomorrow’s plan.');
@@ -1189,6 +1238,17 @@
       saveState();
       renderApp();
       showToast('Your focus is set. One thing at a time.');
+      return;
+    }
+
+    if (formType === 'tomorrow-focus') {
+      const text = String(formData.get('focus') || '').trim().slice(0, 150);
+      if (!text) return;
+      const key = dateKey(getTomorrowDate());
+      state.focus[key] = { text, done: false };
+      saveState();
+      renderApp();
+      showToast('Tomorrow’s priority is set. Keep the rest simple.');
       return;
     }
 
@@ -1221,7 +1281,7 @@
 
   function handleView(viewElement) {
     const nextView = viewElement.dataset.view;
-    if (!['today', 'habits', 'challenges', 'insights', 'settings'].includes(nextView)) return;
+    if (!['today', 'habits', 'planner', 'challenges', 'insights', 'settings'].includes(nextView)) return;
     currentView = nextView;
     editingFocus = false;
     renderApp();
