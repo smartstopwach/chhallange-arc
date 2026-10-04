@@ -2,6 +2,7 @@
   'use strict';
 
   const STORAGE_KEY = 'daymark.app.v1';
+  const SIDEBAR_COLLAPSED_KEY = 'daymark.sidebarCollapsed.v1';
   const DAY_MS = 24 * 60 * 60 * 1000;
   const CATEGORIES = ['Wellness', 'Movement', 'Learning', 'Mindfulness', 'Rest', 'Other'];
   const TIMES = ['Morning', 'Afternoon', 'Evening', 'Anytime'];
@@ -69,6 +70,7 @@
   ];
   const TIMER_PRESETS = [15, 25, 45];
   const PLAN_HOURS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
+  const GOAL_DURATIONS = [1, 2, 3, 4];
   const PLAN_DAYPARTS = [
     { name: 'Overnight', range: 'Quiet hours', icon: 'moon', hours: [0, 1, 2, 3, 4, 5] },
     { name: 'Morning', range: 'A gentle start', icon: 'sunrise', hours: [6, 7, 8, 9, 10, 11] },
@@ -120,7 +122,16 @@
     'arrow-up': '<path d="M12 19V5m-6 6 6-6 6 6"/>',
   };
 
+  function readSidebarPreference() {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
   let state = loadState();
+  let sidebarCollapsed = readSidebarPreference();
   let currentView = 'today';
   let editingFocus = false;
   let selectedMoodDay = '';
@@ -257,6 +268,36 @@
     return legacyHours[value] || '09:00';
   }
 
+  function normalizeGoalDuration(value) {
+    const duration = Math.floor(Number(value));
+    return GOAL_DURATIONS.includes(duration) ? duration : 1;
+  }
+
+  function formatClock(hour) {
+    const normalizedHour = ((Number(hour) % 24) + 24) % 24;
+    return `${normalizedHour % 12 || 12}:00 ${normalizedHour < 12 ? 'AM' : 'PM'}`;
+  }
+
+  function formatGoalRange(goal) {
+    const startHour = Number(normalizeGoalHour(goal.slot).slice(0, 2));
+    const duration = normalizeGoalDuration(goal.duration);
+    const endHour = (startHour + duration) % 24;
+    const nextDay = startHour + duration >= 24 ? ' (+1 day)' : '';
+    return `${formatClock(startHour)}–${formatClock(endHour)}${nextDay}`;
+  }
+
+  function getGoalCoveredHours(goal) {
+    const startHour = Number(normalizeGoalHour(goal.slot).slice(0, 2));
+    const duration = normalizeGoalDuration(goal.duration);
+    return Array.from({ length: duration }, (_, index) => (startHour + index) % 24);
+  }
+
+  function hasGoalTimeConflict(goals, slot, duration) {
+    const startHour = Number(normalizeGoalHour(slot).slice(0, 2));
+    const newHours = new Set(Array.from({ length: normalizeGoalDuration(duration) }, (_, index) => (startHour + index) % 24));
+    return goals.some((goal) => getGoalCoveredHours(goal).some((hour) => newHours.has(hour)));
+  }
+
   function normalizeGoals(value) {
     const goals = {};
     if (!isRecord(value)) return goals;
@@ -267,7 +308,8 @@
         const text = String(goal.text || '').trim().slice(0, 150);
         if (!text) return null;
         const slot = normalizeGoalHour(goal.slot);
-        return { id: String(goal.id || `goal-${index}-${randomId()}`).slice(0, 100), text, done: goal.done === true, slot };
+        const duration = normalizeGoalDuration(goal.duration);
+        return { id: String(goal.id || `goal-${index}-${randomId()}`).slice(0, 100), text, done: goal.done === true, slot, duration };
       }).filter(Boolean);
     });
     return goals;
@@ -511,6 +553,18 @@
     });
   }
 
+  function applySidebarPreference() {
+    const shell = document.querySelector('.app-shell');
+    const toggle = document.querySelector('.sidebar-collapse-toggle');
+    if (shell) shell.classList.toggle('is-sidebar-collapsed', sidebarCollapsed);
+    if (toggle) {
+      const label = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      toggle.setAttribute('aria-label', label);
+      toggle.setAttribute('title', label);
+      toggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
+    }
+  }
+
   function renderNav() {
     document.querySelectorAll('.main-nav [data-view], .settings-link').forEach((button) => {
       const active = button.dataset.view === currentView;
@@ -541,6 +595,7 @@
   function renderApp() {
     const host = document.getElementById('app-content');
     if (!host) return;
+    applySidebarPreference();
     const pages = {
       today: renderTodayView,
       habits: renderHabitsView,
@@ -728,8 +783,8 @@
   }
 
   function renderGoalRow(goal, dayKey, options = {}) {
-    const slotPill = options.showSlot !== false && goal.slot && goal.slot !== 'Anytime'
-      ? `<span class="goal-time-pill">${escapeHtml(goal.slot)}</span>`
+    const slotPill = options.showSlot !== false
+      ? `<span class="goal-time-pill">${escapeHtml(formatGoalRange(goal))}</span>`
       : '';
     return `<li class="goal-row${goal.done ? ' is-done' : ''}${options.planner ? ' planner-goal-row' : ''}"><button class="check-toggle${goal.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${goal.done}" aria-label="${goal.done ? 'Mark incomplete' : 'Complete'} ${escapeHtml(goal.text)}" data-action="toggle-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('check', 13)}</button><span class="goal-text">${escapeHtml(goal.text)}</span>${slotPill}<button class="icon-button goal-delete" type="button" aria-label="Remove goal ${escapeHtml(goal.text)}" data-action="delete-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('close', 14)}</button></li>`;
   }
@@ -759,17 +814,21 @@
     const priority = state.focus[key];
     const habits = scheduledHabitsOn(key);
     const completed = goals.filter((goal) => goal.done).length;
-    const plannedHours = new Set(goals.map((goal) => normalizeGoalHour(goal.slot))).size;
+    const plannedHours = new Set(goals.flatMap(getGoalCoveredHours)).size;
     const timeOptions = PLAN_HOURS.map((hour) => `<option value="${hour}"${hour === '09:00' ? ' selected' : ''}>${hour}</option>`).join('');
+    const durationOptions = GOAL_DURATIONS.map((duration) => `<option value="${duration}"${duration === 1 ? ' selected' : ''}>${duration} hour${duration === 1 ? '' : 's'}</option>`).join('');
     const hourlyTimeline = PLAN_DAYPARTS.map((part) => {
       const partGoals = goals.filter((goal) => part.hours.includes(Number(normalizeGoalHour(goal.slot).slice(0, 2))));
       const hours = part.hours.map((hour) => {
         const time = PLAN_HOURS[hour];
         const hourGoals = goals.filter((goal) => normalizeGoalHour(goal.slot) === time);
+        const continuingGoals = goals.filter((goal) => normalizeGoalHour(goal.slot) !== time && getGoalCoveredHours(goal).includes(hour));
         const content = hourGoals.length
-          ? `<ul class="planner-hour-task-list">${hourGoals.map((goal) => renderGoalRow(goal, key, { planner: true, showSlot: false })).join('')}</ul>`
-          : `<button class="planner-empty-hour" type="button" data-action="focus-planner-hour" data-id="${time}" aria-label="Add a plan for ${time}">${icon('plus', 12)} Open hour · add a plan</button>`;
-        return `<div class="planner-hour-row"><time class="planner-hour-label" datetime="${key}T${time}">${time}</time><span class="planner-hour-rail" aria-hidden="true"><i></i></span><div class="planner-hour-content">${content}</div></div>`;
+          ? `<ul class="planner-hour-task-list">${hourGoals.map((goal) => renderGoalRow(goal, key, { planner: true })).join('')}</ul>`
+          : continuingGoals.length
+            ? `<ul class="planner-continuation-list">${continuingGoals.map((goal) => `<li><span class="planner-continuation-mark">${icon('arrow', 11)}</span><span><strong>${escapeHtml(goal.text)}</strong><small>Continues · ${escapeHtml(formatGoalRange(goal))}</small></span></li>`).join('')}</ul>`
+            : `<button class="planner-empty-hour" type="button" data-action="focus-planner-hour" data-id="${time}" aria-label="Add a plan for ${time}">${icon('plus', 12)} Open hour · add a plan</button>`;
+        return `<div class="planner-hour-row${continuingGoals.length ? ' is-occupied' : ''}"><time class="planner-hour-label" datetime="${key}T${time}">${time}</time><span class="planner-hour-rail" aria-hidden="true"><i></i></span><div class="planner-hour-content">${content}</div></div>`;
       }).join('');
       return `<section class="planner-daypart"><header class="planner-block-heading"><span class="planner-block-icon">${icon(part.icon, 17)}</span><span class="planner-block-title"><strong>${part.name}</strong><small>${part.range}</small></span><span class="planner-block-count">${partGoals.length}</span></header><div class="planner-hour-list">${hours}</div></section>`;
     }).join('');
@@ -782,7 +841,7 @@
       <div class="planner-layout"><div class="planner-sidebar">
         <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
         <section class="card planner-habits-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div><p class="card-overline">ALREADY IN YOUR ROUTINE</p><h2>Habits due tomorrow</h2></div></div><p class="planner-card-copy">Your scheduled habits are included automatically.</p>${habitsContent}</section>
-      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">AN INTENTIONAL DAY</p><h2>Tomorrow, hour by hour</h2><p>Every hour is visible. Tap an open slot to add a task at that exact time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-dayparts">${hourlyTimeline}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a task…"/><label class="sr-only" for="planner-slot-input">Choose an hour</label><select class="form-control" id="planner-slot-input" name="slot">${timeOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
+      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">AN INTENTIONAL DAY</p><h2>Tomorrow, hour by hour</h2><p>Every hour is visible. Tap an open slot to add a task at that exact time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-dayparts">${hourlyTimeline}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a task…"/><label class="sr-only" for="planner-slot-input">Choose a start hour</label><select class="form-control" id="planner-slot-input" name="slot">${timeOptions}</select><label class="sr-only" for="planner-duration-input">Choose duration</label><select class="form-control planner-duration-select" id="planner-duration-input" name="duration">${durationOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
       <p class="page-footnote">Plans are suggestions, not rules. Tomorrow can change—and so can this plan.</p>
     </div>`;
   }
@@ -1091,6 +1150,15 @@
     const action = actionElement.dataset.action;
     const id = actionElement.dataset.id;
     switch (action) {
+      case 'toggle-sidebar':
+        sidebarCollapsed = !sidebarCollapsed;
+        applySidebarPreference();
+        try {
+          localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+        } catch (error) {
+          console.warn('Daymark could not save the sidebar preference.', error);
+        }
+        break;
       case 'add-habit':
         openHabitModal();
         break;
@@ -1241,8 +1309,14 @@
       const key = dateKey(getTomorrowDate());
       const selectedSlot = formData.get('slot');
       const slot = PLAN_HOURS.includes(selectedSlot) ? selectedSlot : '09:00';
-      if (!Array.isArray(state.goals[key])) state.goals[key] = [];
-      state.goals[key].push({ id: randomId(), text, done: false, slot });
+      const duration = normalizeGoalDuration(formData.get('duration'));
+      const dayGoals = Array.isArray(state.goals[key]) ? state.goals[key] : [];
+      if (hasGoalTimeConflict(dayGoals, slot, duration)) {
+        showToast('That time overlaps another plan. Choose another hour or a shorter block.');
+        return;
+      }
+      state.goals[key] = dayGoals;
+      state.goals[key].push({ id: randomId(), text, done: false, slot, duration });
       saveState();
       renderApp();
       showToast('Added to tomorrow’s plan.');

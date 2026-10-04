@@ -12,34 +12,37 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Main sidebar">
-        <a class="brand" href="#today" aria-label="Daymark home" data-view="today">
-          <span class="brand-mark" aria-hidden="true">
-            <span></span><span></span><span></span><span></span>
-          </span>
-          <span class="brand-name">daymark<span>.</span></span>
-        </a>
+        <div class="sidebar-head">
+          <a class="brand" href="#today" aria-label="Daymark home" data-view="today">
+            <span class="brand-mark" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </span>
+            <span class="brand-name">daymark<span>.</span></span>
+          </a>
+          <button class="sidebar-collapse-toggle" type="button" data-action="toggle-sidebar" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true" aria-controls="main-navigation"><span data-icon="chevron" aria-hidden="true"></span></button>
+        </div>
 
         <p class="workspace-label">YOUR SPACE</p>
 
-        <nav class="main-nav" aria-label="Main navigation">
-          <button class="nav-link is-active" type="button" data-view="today" aria-current="page">
+        <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
+          <button class="nav-link is-active" type="button" data-view="today" aria-label="Today" title="Today" aria-current="page">
             <span class="nav-icon" aria-hidden="true" data-icon="grid"></span>
             <span>Today</span>
             <span class="nav-indicator" aria-hidden="true"></span>
           </button>
-          <button class="nav-link" type="button" data-view="habits">
+          <button class="nav-link" type="button" data-view="habits" aria-label="Habits" title="Habits">
             <span class="nav-icon" aria-hidden="true" data-icon="checklist"></span>
             <span>Habits</span>
           </button>
-          <button class="nav-link" type="button" data-view="planner">
+          <button class="nav-link" type="button" data-view="planner" aria-label="Planner" title="Planner">
             <span class="nav-icon" aria-hidden="true" data-icon="calendar"></span>
             <span>Planner</span>
           </button>
-          <button class="nav-link" type="button" data-view="challenges">
+          <button class="nav-link" type="button" data-view="challenges" aria-label="Challenges" title="Challenges">
             <span class="nav-icon" aria-hidden="true" data-icon="flag"></span>
             <span>Challenges</span>
           </button>
-          <button class="nav-link" type="button" data-view="insights">
+          <button class="nav-link" type="button" data-view="insights" aria-label="Insights" title="Insights">
             <span class="nav-icon" aria-hidden="true" data-icon="chart"></span>
             <span>Insights</span>
           </button>
@@ -61,7 +64,7 @@
         </button>
 
         <div class="sidebar-bottom">
-          <button class="nav-link settings-link" type="button" data-view="settings">
+          <button class="nav-link settings-link" type="button" data-view="settings" aria-label="Settings" title="Settings">
             <span class="nav-icon" aria-hidden="true" data-icon="settings"></span>
             <span>Settings</span>
           </button>

@@ -19,8 +19,9 @@ Then visit `http://localhost:4173`.
 - Flexible 7-, 14-, 30-, and 60-day challenges
 - Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
 - Daily mood check-in and private reflection notes
-- Detailed next-day planner with a top priority, a 24-hour schedule, and scheduled habits
+- Detailed next-day planner with a top priority, all 24 hours, selectable 1–4 hour task blocks, overlap protection, and scheduled habits
+- Collapsible desktop sidebar with a saved expand/collapse preference
 - Local browser storage, profile preferences, JSON export, and reset controls
 - Responsive layout and keyboard-accessible controls
 
-No account or backend is required. Progress is stored in this browser under the `daymark.app.v1` local-storage key.
+No account or backend is required. Progress is stored in this browser under the `daymark.app.v1` local-storage key; the sidebar display preference is saved separately.
