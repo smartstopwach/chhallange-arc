@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#121512" />
+    <meta name="description" content="A calmer habit tracker for daily check-ins, small challenges, and a better plan for tomorrow." />
+    <title>Daymark — Make today count</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main sidebar">
+        <a class="brand" href="#today" aria-label="Daymark home" data-view="today">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </span>
+          <span class="brand-name">daymark<span>.</span></span>
+        </a>
+
+        <p class="workspace-label">YOUR SPACE</p>
+
+        <nav class="main-nav" aria-label="Main navigation">
+          <button class="nav-link is-active" type="button" data-view="today" aria-current="page">
+            <span class="nav-icon" aria-hidden="true" data-icon="grid"></span>
+            <span>Today</span>
+            <span class="nav-indicator" aria-hidden="true"></span>
+          </button>
+          <button class="nav-link" type="button" data-view="habits">
+            <span class="nav-icon" aria-hidden="true" data-icon="checklist"></span>
+            <span>Habits</span>
+          </button>
+          <button class="nav-link" type="button" data-view="challenges">
+            <span class="nav-icon" aria-hidden="true" data-icon="flag"></span>
+            <span>Challenges</span>
+          </button>
+          <button class="nav-link" type="button" data-view="insights">
+            <span class="nav-icon" aria-hidden="true" data-icon="chart"></span>
+            <span>Insights</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+
+        <button class="sidebar-challenge" type="button" data-view="challenges" aria-label="View your active challenge">
+          <span class="sidebar-challenge-top">
+            <span class="sidebar-challenge-label">IN PROGRESS</span>
+            <span class="sidebar-challenge-spark" data-icon="sparkles" aria-hidden="true"></span>
+          </span>
+          <span class="sidebar-challenge-name" id="sidebar-challenge-name">21-Day Reset</span>
+          <span class="sidebar-progress-track"><span id="sidebar-progress-fill"></span></span>
+          <span class="sidebar-challenge-bottom">
+            <span id="sidebar-challenge-day">Day 1 of 21</span>
+            <span id="sidebar-challenge-checkins">0 check-ins</span>
+          </span>
+        </button>
+
+        <div class="sidebar-bottom">
+          <button class="nav-link settings-link" type="button" data-view="settings">
+            <span class="nav-icon" aria-hidden="true" data-icon="settings"></span>
+            <span>Settings</span>
+          </button>
+          <button class="profile-button" type="button" data-view="settings" aria-label="Open your settings">
+            <span class="profile-avatar" id="profile-avatar">D</span>
+            <span class="profile-copy">
+              <strong id="profile-name">Your space</strong>
+              <small>Private tracker</small>
+            </span>
+            <span class="profile-caret" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="breadcrumb" aria-label="Current page">
+            <span class="breadcrumb-root">Workspace</span>
+            <span class="breadcrumb-slash" aria-hidden="true">/</span>
+            <strong id="breadcrumb-current">Today</strong>
+          </div>
+          <div class="topbar-actions">
+            <span class="top-date" id="top-date"></span>
+            <span class="topbar-divider" aria-hidden="true"></span>
+            <button class="button button-primary button-small" type="button" data-action="add-habit">
+              <span data-icon="plus" aria-hidden="true"></span>
+              <span>Add habit</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page-container" id="page-container" tabindex="-1">
+          <div id="app-content"></div>
+        </div>
+      </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div class="toast-host" id="toast-host" role="status" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>
