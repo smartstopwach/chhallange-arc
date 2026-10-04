@@ -703,24 +703,39 @@ svg { display: block; }
 .planner-schedule-header > div > p:last-child { margin: 6px 0 0; color: #859087; font-size: 9px; line-height: 1.55; }
 .planner-date-chip { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #353e35; border-radius: 7px; background: #222722; color: #a9b4a6; font-size: 8px; font-weight: 600; }
 .planner-date-chip svg { width: 12px; height: 12px; color: var(--accent); }
-.planner-time-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.planner-time-block { min-width: 0; padding: 11px; border: 1px solid #2f3730; border-radius: 11px; background: #191e1a; }
-.planner-block-heading { display: flex; align-items: center; gap: 8px; padding-bottom: 9px; border-bottom: 1px solid #2a312b; }
+.planner-dayparts { display: grid; gap: 11px; }
+.planner-daypart { min-width: 0; overflow: hidden; border: 1px solid #2f3730; border-radius: 11px; background: #191e1a; }
+.planner-block-heading { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2a312b; background: #1d231e; }
 .planner-block-icon { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border: 1px solid #394336; border-radius: 8px; background: #252d23; color: #bad296; }
 .planner-block-icon svg { width: 14px; height: 14px; }
 .planner-block-title { display: grid; min-width: 0; gap: 2px; }
 .planner-block-title strong { color: #d6dfd2; font-size: 9px; font-weight: 700; }
 .planner-block-title small { color: #758174; font-size: 7px; }
 .planner-block-count { display: grid; width: 20px; height: 20px; margin-left: auto; place-items: center; border: 1px solid #333c33; border-radius: 7px; color: #aab5a8; font-size: 8px; }
-.planner-goal-list { display: grid; margin: 0; padding: 2px 0 0; list-style: none; }
-.planner-goal-row { gap: 7px; padding: 8px 0 3px; border-bottom: 0; }
+.planner-hour-list { display: grid; }
+.planner-hour-row { display: grid; min-height: 43px; grid-template-columns: 47px 12px minmax(0, 1fr); align-items: stretch; gap: 9px; padding: 2px 12px; border-bottom: 1px solid #252c26; }
+.planner-hour-row:last-child { border-bottom: 0; }
+.planner-hour-label { padding-top: 11px; color: #a3afa0; font-family: 'DM Sans', sans-serif; font-size: 9px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.planner-hour-rail { position: relative; display: flex; align-items: flex-start; justify-content: center; }
+.planner-hour-rail::before { position: absolute; top: 0; bottom: 0; width: 1px; background: #343c34; content: ''; }
+.planner-hour-row:first-child .planner-hour-rail::before { top: 50%; }
+.planner-hour-row:last-child .planner-hour-rail::before { bottom: 50%; }
+.planner-hour-rail i { position: relative; z-index: 1; width: 7px; height: 7px; margin-top: 13px; border: 1px solid #71815e; border-radius: 50%; background: #273023; }
+.planner-hour-row:has(.planner-hour-task-list) .planner-hour-rail i { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px rgb(197 238 120 / 8%); }
+.planner-hour-content { min-width: 0; align-self: center; }
+.planner-hour-task-list { display: grid; margin: 0; padding: 3px 0; list-style: none; }
+.planner-goal-row { gap: 7px; padding: 5px 0; border-bottom: 0; }
 .planner-goal-row .check-toggle { width: 18px; height: 18px; border-radius: 5px; }
 .planner-goal-row .goal-text { font-size: 9px; }
 .planner-goal-row .goal-delete { width: 22px; height: 22px; }
-.planner-block-empty { margin: 11px 0 2px; color: #667267; font-size: 8px; }
-.planner-add-form { display: grid; grid-template-columns: minmax(0, 1fr) 124px auto; gap: 8px; margin-top: 14px; }
+.planner-empty-hour { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: #667267; cursor: pointer; font-size: 8px; text-align: left; transition: color .16s ease; }
+.planner-empty-hour svg { width: 12px; height: 12px; }
+.planner-empty-hour:hover { color: var(--accent); }
+.planner-add-form { display: grid; grid-template-columns: minmax(0, 1fr) 88px auto; gap: 8px; margin-top: 14px; }
 .planner-add-form .form-control { min-width: 0; }
 .planner-add-form .button { min-height: 41px; }
+.inline-time-select { width: 84px; height: 37px; flex: 0 0 auto; padding: 0 6px; border: 1px solid #343d35; border-radius: 9px; background: #151a16; color: #aebaa9; font-size: 8px; outline: none; }
+.inline-time-select:focus { border-color: #72875d; box-shadow: 0 0 0 3px rgb(197 238 120 / 7%); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .goal-list {  display: grid; gap: 0; margin: 0 0 11px; padding: 0; list-style: none; }
 .goal-row { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid #2b322c; }
@@ -1089,8 +1104,8 @@ body.has-modal { overflow: hidden; }
   .bar-track { height: 102px; }
   .tomorrow-card, .mood-card { padding: 17px 15px; }
   .planner-priority-card, .planner-habits-card, .planner-schedule-card { padding: 16px 15px; }
-  .planner-time-blocks { grid-template-columns: minmax(0, 1fr); }
-  .planner-add-form { grid-template-columns: minmax(0, 1fr) 112px; }
+  .planner-hour-row { grid-template-columns: 42px 10px minmax(0, 1fr); gap: 6px; padding-inline: 9px; }
+  .planner-add-form { grid-template-columns: minmax(0, 1fr) 84px; }
   .planner-add-form .button { grid-column: 1 / -1; justify-self: start; }
   .mood-layout { gap: 13px; }
   .mood-choices { gap: 5px; margin-bottom: 12px; }
@@ -1137,6 +1152,7 @@ body.has-modal { overflow: hidden; }
   .stats-grid { gap: 7px; }
   .stat-card { padding-inline: 9px; }
   .habit-time { display: none; }
+  .inline-time-select { width: 75px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -68,11 +68,12 @@
     { id: 'rough', label: 'Rough', icon: 'mind' },
   ];
   const TIMER_PRESETS = [15, 25, 45];
-  const PLAN_SLOTS = [
-    { value: 'Morning', icon: 'sunrise', range: 'Start gently' },
-    { value: 'Afternoon', icon: 'target', range: 'Midday momentum' },
-    { value: 'Evening', icon: 'moon', range: 'Wind down well' },
-    { value: 'Anytime', icon: 'clock', range: 'Whenever it fits' },
+  const PLAN_HOURS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
+  const PLAN_DAYPARTS = [
+    { name: 'Overnight', range: 'Quiet hours', icon: 'moon', hours: [0, 1, 2, 3, 4, 5] },
+    { name: 'Morning', range: 'A gentle start', icon: 'sunrise', hours: [6, 7, 8, 9, 10, 11] },
+    { name: 'Afternoon', range: 'Midday momentum', icon: 'target', hours: [12, 13, 14, 15, 16, 17] },
+    { name: 'Evening', range: 'Wind down well', icon: 'moon', hours: [18, 19, 20, 21, 22, 23] },
   ];
   const WEEKDAYS = [
     { value: 1, label: 'M' }, { value: 2, label: 'T' }, { value: 3, label: 'W' },
@@ -250,6 +251,12 @@
     return logs;
   }
 
+  function normalizeGoalHour(value) {
+    if (PLAN_HOURS.includes(value)) return value;
+    const legacyHours = { Morning: '09:00', Afternoon: '14:00', Evening: '19:00', Anytime: '09:00' };
+    return legacyHours[value] || '09:00';
+  }
+
   function normalizeGoals(value) {
     const goals = {};
     if (!isRecord(value)) return goals;
@@ -259,7 +266,7 @@
         if (!isRecord(goal)) return null;
         const text = String(goal.text || '').trim().slice(0, 150);
         if (!text) return null;
-        const slot = PLAN_SLOTS.some((item) => item.value === goal.slot) ? goal.slot : 'Anytime';
+        const slot = normalizeGoalHour(goal.slot);
         return { id: String(goal.id || `goal-${index}-${randomId()}`).slice(0, 100), text, done: goal.done === true, slot };
       }).filter(Boolean);
     });
@@ -733,13 +740,14 @@
     const goals = state.goals[key] || [];
     const focus = state.focus[key];
     const completed = goals.filter((goal) => goal.done).length;
+    const timeOptions = PLAN_HOURS.map((hour) => `<option value="${hour}"${hour === '09:00' ? ' selected' : ''}>${hour}</option>`).join('');
     const goalRows = goals.length
       ? `<ul class="goal-list">${goals.map((goal) => renderGoalRow(goal, key)).join('')}</ul>`
       : `<div class="goal-empty"><span class="goal-empty-icon">${icon('sparkles', 15)}</span><span><strong>A softer start begins here.</strong><br>Add one small thing you would like to do tomorrow.</span></div>`;
     return `<section class="card tomorrow-card" aria-labelledby="tomorrow-title">
       <div class="tomorrow-layout">
         <div class="tomorrow-intro"><div class="tomorrow-date">${icon('calendar', 14)} ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }))}</div><h2 id="tomorrow-title">Plan for tomorrow</h2><p>Leave a little note for your future self. Keep it kind, clear, and doable.</p><div class="tomorrow-progress">${icon('check-circle', 14)}<span>${goals.length ? `${completed} of ${goals.length} goal${goals.length === 1 ? '' : 's'} checked off` : 'No pressure. One goal is a great start.'}</span></div><div class="tomorrow-priority-preview"><span>${icon('target', 14)}</span><span><small>TOP PRIORITY</small><strong>${focus ? escapeHtml(focus.text) : 'Not set yet'}</strong></span></div><button class="button-link planner-open-link" type="button" data-view="planner">Open full planner ${icon('arrow', 13)}</button></div>
-        <div class="tomorrow-content">${goalRows}<form class="inline-form goal-form" data-form="goal"><input class="inline-input" type="text" name="goal" maxlength="150" required autocomplete="off" placeholder="Add a small, doable goal…" aria-label="Add a goal for tomorrow"/><button class="inline-submit" type="submit" aria-label="Add goal for tomorrow">${icon('plus', 16)}</button></form></div>
+        <div class="tomorrow-content">${goalRows}<form class="inline-form goal-form" data-form="goal"><input class="inline-input" type="text" name="goal" maxlength="150" required autocomplete="off" placeholder="Add a small, doable goal…" aria-label="Add a goal for tomorrow"/><select class="inline-time-select" name="slot" aria-label="Choose a time for this goal">${timeOptions}</select><button class="inline-submit" type="submit" aria-label="Add goal for tomorrow">${icon('plus', 16)}</button></form></div>
       </div>
     </section>`;
   }
@@ -751,25 +759,30 @@
     const priority = state.focus[key];
     const habits = scheduledHabitsOn(key);
     const completed = goals.filter((goal) => goal.done).length;
-    const plannedSlots = new Set(goals.map((goal) => goal.slot || 'Anytime')).size;
-    const slotOptions = PLAN_SLOTS.map((slot) => `<option value="${slot.value}">${slot.value}</option>`).join('');
-    const blocks = PLAN_SLOTS.map((slot) => {
-      const slotGoals = goals.filter((goal) => (goal.slot || 'Anytime') === slot.value);
-      const tasks = slotGoals.length
-        ? `<ul class="planner-goal-list">${slotGoals.map((goal) => renderGoalRow(goal, key, { planner: true, showSlot: false })).join('')}</ul>`
-        : `<p class="planner-block-empty">Nothing planned here yet.</p>`;
-      return `<section class="planner-time-block"><div class="planner-block-heading"><span class="planner-block-icon">${icon(slot.icon, 17)}</span><span class="planner-block-title"><strong>${slot.value}</strong><small>${slot.range}</small></span><span class="planner-block-count">${slotGoals.length}</span></div>${tasks}</section>`;
+    const plannedHours = new Set(goals.map((goal) => normalizeGoalHour(goal.slot))).size;
+    const timeOptions = PLAN_HOURS.map((hour) => `<option value="${hour}"${hour === '09:00' ? ' selected' : ''}>${hour}</option>`).join('');
+    const hourlyTimeline = PLAN_DAYPARTS.map((part) => {
+      const partGoals = goals.filter((goal) => part.hours.includes(Number(normalizeGoalHour(goal.slot).slice(0, 2))));
+      const hours = part.hours.map((hour) => {
+        const time = PLAN_HOURS[hour];
+        const hourGoals = goals.filter((goal) => normalizeGoalHour(goal.slot) === time);
+        const content = hourGoals.length
+          ? `<ul class="planner-hour-task-list">${hourGoals.map((goal) => renderGoalRow(goal, key, { planner: true, showSlot: false })).join('')}</ul>`
+          : `<button class="planner-empty-hour" type="button" data-action="focus-planner-hour" data-id="${time}" aria-label="Add a plan for ${time}">${icon('plus', 12)} Open hour · add a plan</button>`;
+        return `<div class="planner-hour-row"><time class="planner-hour-label" datetime="${key}T${time}">${time}</time><span class="planner-hour-rail" aria-hidden="true"><i></i></span><div class="planner-hour-content">${content}</div></div>`;
+      }).join('');
+      return `<section class="planner-daypart"><header class="planner-block-heading"><span class="planner-block-icon">${icon(part.icon, 17)}</span><span class="planner-block-title"><strong>${part.name}</strong><small>${part.range}</small></span><span class="planner-block-count">${partGoals.length}</span></header><div class="planner-hour-list">${hours}</div></section>`;
     }).join('');
     const habitsContent = habits.length
       ? `<ul class="planner-habit-list">${habits.map((habit) => `<li><span class="habit-symbol tone-${getHabitIcon(habit)}">${icon(getHabitIcon(habit), 16)}</span><span><strong>${escapeHtml(habit.name)}</strong><small>${escapeHtml(habit.time)} · ${escapeHtml(habit.category)}</small></span></li>`).join('')}</ul>`
       : `<div class="planner-rest-note">${icon('moon', 16)}<span>No habits scheduled. Tomorrow is a planned rest day.</span></div>`;
     return `<div class="planner-view">
-      <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">TOMORROW · ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase())}</p><h1>Give tomorrow<br/><span>a head start.</span></h1><p>Choose one priority, place a few tasks into your day, and let the rest wait.</p></div><div class="page-intro-action"><button class="button button-secondary" type="button" data-view="today">${icon('arrow-left', 15)} Back to today</button></div></header>
-      <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : 'A roomier day is planned', 'check-circle', 'blue')}${renderStatCard('Dayparts planned', String(plannedSlots), 'blocks', plannedSlots ? 'Your day has a shape' : 'No schedule pressure', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
+      <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">TOMORROW · ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase())}</p><h1>Give tomorrow<br/><span>a head start.</span></h1><p>Plan the day hour by hour. Add structure where it helps and leave breathing room where it does not.</p></div><div class="page-intro-action"><button class="button button-secondary" type="button" data-view="today">${icon('arrow-left', 15)} Back to today</button></div></header>
+      <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : 'A roomier day is planned', 'check-circle', 'blue')}${renderStatCard('Hours with a plan', String(plannedHours), 'of 24', plannedHours ? 'Your day has a clear shape' : 'Start with one time block', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
       <div class="planner-layout"><div class="planner-sidebar">
         <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
         <section class="card planner-habits-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div><p class="card-overline">ALREADY IN YOUR ROUTINE</p><h2>Habits due tomorrow</h2></div></div><p class="planner-card-copy">Your scheduled habits are included automatically.</p>${habitsContent}</section>
-      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">A GENTLE SHAPE FOR THE DAY</p><h2>Tomorrow, at a glance</h2><p>Drop tasks into a part of the day. Move them or change your mind any time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-time-blocks">${blocks}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a small, doable task…"/><label class="sr-only" for="planner-slot-input">Choose when to do it</label><select class="form-control" id="planner-slot-input" name="slot">${slotOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
+      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">AN INTENTIONAL DAY</p><h2>Tomorrow, hour by hour</h2><p>Every hour is visible. Tap an open slot to add a task at that exact time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-dayparts">${hourlyTimeline}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a task…"/><label class="sr-only" for="planner-slot-input">Choose an hour</label><select class="form-control" id="planner-slot-input" name="slot">${timeOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
       <p class="page-footnote">Plans are suggestions, not rules. Tomorrow can change—and so can this plan.</p>
     </div>`;
   }
@@ -1133,6 +1146,13 @@
       case 'select-mood':
         selectMood(id);
         break;
+      case 'focus-planner-hour': {
+        const slotInput = document.getElementById('planner-slot-input');
+        const taskInput = document.getElementById('planner-goal-input');
+        if (slotInput && PLAN_HOURS.includes(id)) slotInput.value = id;
+        if (taskInput) taskInput.focus();
+        break;
+      }
       case 'join-challenge':
         startChallenge(id);
         break;
@@ -1220,7 +1240,7 @@
       if (!text) return;
       const key = dateKey(getTomorrowDate());
       const selectedSlot = formData.get('slot');
-      const slot = PLAN_SLOTS.some((item) => item.value === selectedSlot) ? selectedSlot : 'Anytime';
+      const slot = PLAN_HOURS.includes(selectedSlot) ? selectedSlot : '09:00';
       if (!Array.isArray(state.goals[key])) state.goals[key] = [];
       state.goals[key].push({ id: randomId(), text, done: false, slot });
       saveState();
