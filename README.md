@@ -1,6 +1,6 @@
 # Daymark
 
-A calm, dark-mode habit and challenge tracker focused on small daily wins. Daymark is a dependency-free static site: habits, check-ins, a daily focus, tomorrow's goals, challenge progress, and insights all run in the browser and are saved locally.
+A calm, dark-mode habit and challenge tracker focused on small daily wins. Daymark is a dependency-free static site: habits, check-ins, focus sessions, daily reflections, tomorrow's goals, challenge progress, and insights all run in the browser and are saved locally.
 
 ## Run locally
 
@@ -14,10 +14,12 @@ Then visit `http://localhost:4173`.
 
 ## Features
 
-- Daily habit checklist with editable categories, reminders, and progress
+- Daily habit checklist with categories, time-of-day cues, and custom weekday schedules
 - Personal streaks, a 7-day activity chart, and 30-day insights/consistency map
-- Flexible challenges with day-by-day check-ins
-- A daily focus and a next-day goal planner
+- Flexible 7-, 14-, 30-, and 60-day challenges
+- Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
+- Daily mood check-in and private reflection notes
+- Daily focus and next-day goal planner
 - Local browser storage, profile preferences, JSON export, and reset controls
 - Responsive layout and keyboard-accessible controls
 
