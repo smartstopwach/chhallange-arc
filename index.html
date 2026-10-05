@@ -2,10 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#121512" />
     <meta name="description" content="A calmer habit tracker with custom schedules, focus sessions, daily reflections, and a better plan for tomorrow." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Daymark" />
     <title>Daymark — Make today count</title>
+    <link rel="icon" type="image/svg+xml" href="daymark-icon.svg" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
     <script src="app.js" defer></script>
   </head>
@@ -89,7 +96,7 @@
           <div class="topbar-actions">
             <span class="top-date" id="top-date"></span>
             <span class="topbar-divider" aria-hidden="true"></span>
-            <button class="button button-primary button-small" type="button" data-action="add-habit">
+            <button class="button button-primary button-small" type="button" data-action="add-habit" aria-label="Add a habit" title="Add a habit">
               <span data-icon="plus" aria-hidden="true"></span>
               <span>Add habit</span>
             </button>
