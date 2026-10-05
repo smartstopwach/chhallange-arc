@@ -21,6 +21,7 @@ Then visit `http://localhost:4173`.
 - Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
 - Daily mood check-in and private reflection notes
 - Detailed next-day planner with a top priority, all 24 hours, selectable 1–4 hour task blocks, overlap protection, and scheduled habits
+- Date-based task handoff: tomorrow's tasks appear in Today on their calendar date; open views refresh at local midnight and charts include today's check-ins
 - Collapsible desktop sidebar with a saved expand/collapse preference
 - Local browser storage, profile preferences, JSON export, and reset controls
 - Responsive layout and keyboard-accessible controls, tuned for phone and tablet screens

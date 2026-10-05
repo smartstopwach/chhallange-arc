@@ -709,6 +709,17 @@ svg { display: block; }
 .reflection-footer > span { color: #788579; font-size: 8px; line-height: 1.5; }
 .reflection-footer .button { flex: 0 0 auto; }
 
+.today-plan-card { grid-column: 1 / -1; padding: 18px 22px; }
+.today-plan-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.today-plan-heading { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.today-plan-heading > div { min-width: 0; }
+.today-plan-heading .card-overline { margin: 0 0 3px; }
+.today-plan-heading h2 { margin: 0; color: #e9eee8; font-size: 14px; font-weight: 700; }
+.today-plan-heading p:last-child { margin: 4px 0 0; color: #879188; font-size: 9px; line-height: 1.5; }
+.today-plan-progress { max-width: 390px; margin: 15px 0 8px; }
+.today-plan-card .goal-list { margin-bottom: 0; }
+.today-plan-card .goal-row:first-child { padding-top: 7px; }
+
 .tomorrow-card { grid-column: 1 / -1; padding: 20px 22px; }
 .tomorrow-layout { display: grid; grid-template-columns: minmax(210px, .72fr) minmax(0, 1.5fr); gap: 28px; align-items: start; }
 .tomorrow-intro { padding: 3px 0; }
@@ -1192,7 +1203,10 @@ body.has-modal { overflow: hidden; }
   .activity-chart { grid-template-rows: 128px auto; column-gap: 6px; }
   .activity-chart-axis, .activity-day-labels, .month-x-labels { font-size: 7px; }
   .activity-line { stroke-width: 2.5px; }
-  .tomorrow-card, .mood-card { padding: 17px 15px; }
+  .tomorrow-card, .mood-card, .today-plan-card { padding: 17px 15px; }
+  .today-plan-header { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .today-plan-heading { align-items: flex-start; }
+  .today-plan-progress { max-width: none; margin-top: 12px; }
   .planner-priority-card, .planner-habits-card, .planner-schedule-card { padding: 16px 15px; }
   .planner-hour-row { grid-template-columns: 42px 10px minmax(0, 1fr); gap: 6px; padding-inline: 9px; }
   .planner-add-form { grid-template-columns: minmax(0, 1fr) 75px 80px; }

@@ -143,6 +143,7 @@
   let reflectionDraft = '';
   let toastTimer = null;
   let timerTicker = null;
+  let lastRenderedDay = '';
 
   function icon(name, size = 18) {
     const content = ICONS[name] || ICONS.sparkles;
@@ -633,6 +634,7 @@
   function renderApp() {
     const host = document.getElementById('app-content');
     if (!host) return;
+    const renderedDay = getTodayKey();
     applySidebarPreference();
     const pages = {
       today: renderTodayView,
@@ -643,6 +645,7 @@
       settings: renderSettingsView,
     };
     host.innerHTML = (pages[currentView] || renderTodayView)();
+    lastRenderedDay = renderedDay;
     renderNav();
     document.title = `${({ today: 'Today', habits: 'Habits', planner: 'Planner', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today'} · Daymark`;
   }
@@ -726,7 +729,7 @@
         ${managed ? meta : detail}
       </div>
       <div class="habit-row-actions">
-        <button type="button" class="check-toggle${checked ? ' is-checked' : ''}" role="checkbox" aria-checked="${checked}" aria-label="${unavailable ? `${name} is not scheduled today` : `${checked ? 'Mark' : 'Complete'} ${name}`}" data-action="toggle-habit" data-id="${safeId}"${unavailable ? ' disabled' : ''}>${icon('check', 14)}</button>
+        <button type="button" class="check-toggle${checked ? ' is-checked' : ''}" role="checkbox" aria-checked="${checked}" aria-label="${unavailable ? `${name} is not scheduled today` : `${checked ? 'Mark' : 'Complete'} ${name}`}" data-action="toggle-habit" data-id="${safeId}" data-day="${todayKey}"${unavailable ? ' disabled' : ''}>${icon('check', 14)}</button>
         ${managed ? `<button class="icon-button" type="button" aria-label="Edit ${name}" data-action="edit-habit" data-id="${safeId}">${icon('edit', 15)}</button><button class="icon-button is-danger" type="button" aria-label="Delete ${name}" data-action="delete-habit" data-id="${safeId}">${icon('trash', 15)}</button>` : ''}
       </div>
     </li>`;
@@ -842,7 +845,7 @@
     const chartDescription = series.map((item) => `${formatDate(item.date, { weekday: 'long' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
     const labels = series.map((item) => `<span${item.key === getTodayKey() ? ' class="is-today"' : ''}>${escapeHtml(formatDate(item.date, { weekday: 'short' }).replace('.', ''))}</span>`).join('');
     return `<section class="card chart-card" aria-labelledby="weekly-chart-title">
-      <div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="weekly-chart-title">Your week, in rhythm</h2><p>Completion on days you planned a habit.</p></div></div><span class="chart-period">${icon('calendar', 12)} 7 days</span></div>
+      <div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="weekly-chart-title">Your week, in rhythm</h2><p>Scheduled habit completion through today; rest days are not counted.</p></div></div><span class="chart-period">${icon('calendar', 12)} 7 days</span></div>
       <div class="chart-summary"><strong>${average}%</strong><span>average completion</span><span class="chart-legend">Habits done</span></div>
       <div class="activity-chart" role="img" aria-label="Habit completion over the last seven days, average ${average} percent. ${escapeHtml(chartDescription)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${renderActivityPlot(series, 'week-activity')}<div class="activity-day-labels" aria-hidden="true">${labels}</div></div>
       <div class="chart-foot">${hasActivity && bestDay ? `<span>Best day: <strong>${escapeHtml(formatDate(bestDay.date, { weekday: 'long' }))}</strong></span><button class="button-link" type="button" data-view="insights">More insights ${icon('arrow', 13)}</button>` : `<span class="chart-empty-message">Your first check-in will bring this chart to life.</span><button class="button-link" type="button" data-view="insights">See insights ${icon('arrow', 13)}</button>`}</div>
@@ -857,8 +860,8 @@
       <div class="card-overline">ONE THING AT A TIME</div>
       <div class="focus-title-line"><h2 id="focus-card-title">Today's focus</h2>${focus && !editingFocus ? `<button class="button-link" type="button" data-action="edit-focus">Edit ${icon('edit', 13)}</button>` : ''}</div>
       ${showForm
-        ? `<p class="focus-empty">What would make today feel like a good day?</p><form class="inline-form" data-form="focus"><input class="inline-input" name="focus" type="text" maxlength="150" required autocomplete="off" placeholder="Set one small priority…" aria-label="Today's main focus" value="${escapeHtml(focus?.text || '')}" /><button class="inline-submit" type="submit" aria-label="Save today's focus">${icon('arrow', 16)}</button></form>`
-        : `<div class="focus-task${focus.done ? ' is-done' : ''}"><button class="check-toggle${focus.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${focus.done}" aria-label="${focus.done ? 'Mark focus incomplete' : 'Complete today’s focus'}" data-action="toggle-focus">${icon('check', 14)}</button><div class="focus-task-copy"><strong>${escapeHtml(focus.text)}</strong><small>${focus.done ? 'That is one meaningful thing, done.' : 'A clear intention for the day.'}</small></div></div>`}
+        ? `<p class="focus-empty">What would make today feel like a good day?</p><form class="inline-form" data-form="focus" data-day="${todayKey}"><input class="inline-input" name="focus" type="text" maxlength="150" required autocomplete="off" placeholder="Set one small priority…" aria-label="Today's main focus" value="${escapeHtml(focus?.text || '')}" /><button class="inline-submit" type="submit" aria-label="Save today's focus">${icon('arrow', 16)}</button></form>`
+        : `<div class="focus-task${focus.done ? ' is-done' : ''}"><button class="check-toggle${focus.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${focus.done}" aria-label="${focus.done ? 'Mark focus incomplete' : 'Complete today’s focus'}" data-action="toggle-focus" data-day="${todayKey}">${icon('check', 14)}</button><div class="focus-task-copy"><strong>${escapeHtml(focus.text)}</strong><small>${focus.done ? 'That is one meaningful thing, done.' : 'A clear intention for the day.'}</small></div></div>`}
     </section>`;
   }
 
@@ -882,9 +885,9 @@
     const reflection = state.reflections[key] || { mood: '', note: '' };
     const mood = selectedMoodDay === key ? selectedMood : reflection.mood;
     const note = reflectionDraftDay === key ? reflectionDraft : reflection.note;
-    const moodOptions = MOODS.map((item) => `<button class="mood-choice${mood === item.id ? ' is-selected' : ''}" type="button" data-action="select-mood" data-id="${item.id}" aria-pressed="${mood === item.id}"><span>${icon(item.icon, 17)}</span><small>${item.label}</small></button>`).join('');
+    const moodOptions = MOODS.map((item) => `<button class="mood-choice${mood === item.id ? ' is-selected' : ''}" type="button" data-action="select-mood" data-id="${item.id}" data-day="${key}" aria-pressed="${mood === item.id}"><span>${icon(item.icon, 17)}</span><small>${item.label}</small></button>`).join('');
     const status = mood ? `${getMoodLabel(mood)} noted. Add a thought if you like.` : 'Optional · a quick check-in can help you notice patterns.';
-    return `<section class="card mood-card" aria-labelledby="mood-card-title"><div class="mood-layout"><div class="mood-intro"><p class="card-overline">A MOMENT FOR YOU</p><h2 id="mood-card-title">How are you,<br/><span>really?</span></h2><p>No score, no streak. Just a small space to notice how today feels.</p><span class="mood-privacy-note">${icon('lock', 12)} Only saved on this device</span></div><div class="mood-content"><div class="mood-choices" role="group" aria-label="Choose your mood">${moodOptions}</div><form data-form="reflection" class="reflection-form"><label class="form-label" for="reflection-note">A note to yourself <span>optional</span></label><textarea id="reflection-note" class="form-control reflection-input" name="note" maxlength="280" placeholder="What is on your mind today?">${escapeHtml(note || '')}</textarea><div class="reflection-footer"><span id="mood-selection-status" aria-live="polite">${escapeHtml(status)}</span><button class="button button-secondary button-small" type="submit">Save check-in ${icon('check', 13)}</button></div></form></div></div></section>`;
+    return `<section class="card mood-card" aria-labelledby="mood-card-title"><div class="mood-layout"><div class="mood-intro"><p class="card-overline">A MOMENT FOR YOU</p><h2 id="mood-card-title">How are you,<br/><span>really?</span></h2><p>No score, no streak. Just a small space to notice how today feels.</p><span class="mood-privacy-note">${icon('lock', 12)} Only saved on this device</span></div><div class="mood-content"><div class="mood-choices" role="group" aria-label="Choose your mood">${moodOptions}</div><form data-form="reflection" data-day="${key}" class="reflection-form"><label class="form-label" for="reflection-note">A note to yourself <span>optional</span></label><textarea id="reflection-note" class="form-control reflection-input" name="note" maxlength="280" placeholder="What is on your mind today?">${escapeHtml(note || '')}</textarea><div class="reflection-footer"><span id="mood-selection-status" aria-live="polite">${escapeHtml(status)}</span><button class="button button-secondary button-small" type="submit">Save check-in ${icon('check', 13)}</button></div></form></div></div></section>`;
   }
 
   function renderGoalRow(goal, dayKey, options = {}) {
@@ -892,6 +895,17 @@
       ? `<span class="goal-time-pill">${escapeHtml(formatGoalRange(goal))}</span>`
       : '';
     return `<li class="goal-row${goal.done ? ' is-done' : ''}${options.planner ? ' planner-goal-row' : ''}"><button class="check-toggle${goal.done ? ' is-checked' : ''}" type="button" role="checkbox" aria-checked="${goal.done}" aria-label="${goal.done ? 'Mark incomplete' : 'Complete'} ${escapeHtml(goal.text)}" data-action="toggle-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('check', 13)}</button><span class="goal-text">${escapeHtml(goal.text)}</span>${slotPill}<button class="icon-button goal-delete" type="button" aria-label="Remove goal ${escapeHtml(goal.text)}" data-action="delete-goal" data-day="${dayKey}" data-id="${escapeHtml(goal.id)}">${icon('close', 14)}</button></li>`;
+  }
+
+  function renderTodayPlanCard(todayKey = getTodayKey()) {
+    const today = dateFromKey(todayKey);
+    const key = todayKey;
+    const goals = [...(state.goals[key] || [])].sort((left, right) => normalizeGoalHour(left.slot).localeCompare(normalizeGoalHour(right.slot)));
+    if (!goals.length) return '';
+    const completed = goals.filter((goal) => goal.done).length;
+    const percent = Math.round((completed / goals.length) * 100);
+    const rows = goals.map((goal) => renderGoalRow(goal, key)).join('');
+    return `<section class="card today-plan-card" aria-labelledby="today-plan-title"><div class="today-plan-header"><div class="today-plan-heading"><span class="card-heading-icon">${icon('calendar', 18)}</span><div><p class="card-overline">PLANNED FOR TODAY</p><h2 id="today-plan-title">Today's plan</h2><p>${escapeHtml(formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' }))} · Your next-day plan shows up here on its date.</p></div></div><button class="button-link" type="button" data-view="planner">Plan tomorrow ${icon('arrow', 13)}</button></div><div class="today-plan-progress"><div class="progress-meta"><span>Planned tasks</span><span><strong>${completed} of ${goals.length} complete</strong></span></div><div class="progress-track" role="progressbar" aria-label="Today's planned task completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div></div><ul class="goal-list">${rows}</ul></section>`;
   }
 
   function renderTomorrowCard() {
@@ -907,7 +921,7 @@
     return `<section class="card tomorrow-card" aria-labelledby="tomorrow-title">
       <div class="tomorrow-layout">
         <div class="tomorrow-intro"><div class="tomorrow-date">${icon('calendar', 14)} ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }))}</div><h2 id="tomorrow-title">Plan for tomorrow</h2><p>Leave a little note for your future self. Keep it kind, clear, and doable.</p><div class="tomorrow-progress">${icon('check-circle', 14)}<span>${goals.length ? `${completed} of ${goals.length} goal${goals.length === 1 ? '' : 's'} checked off` : 'No pressure. One goal is a great start.'}</span></div><div class="tomorrow-priority-preview"><span>${icon('target', 14)}</span><span><small>TOP PRIORITY</small><strong>${focus ? escapeHtml(focus.text) : 'Not set yet'}</strong></span></div><button class="button-link planner-open-link" type="button" data-view="planner">Open full planner ${icon('arrow', 13)}</button></div>
-        <div class="tomorrow-content">${goalRows}<form class="inline-form goal-form" data-form="goal"><input class="inline-input" type="text" name="goal" maxlength="150" required autocomplete="off" placeholder="Add a small, doable goal…" aria-label="Add a goal for tomorrow"/><select class="inline-time-select" name="slot" aria-label="Choose a time for this goal">${timeOptions}</select><button class="inline-submit" type="submit" aria-label="Add goal for tomorrow">${icon('plus', 16)}</button></form></div>
+        <div class="tomorrow-content">${goalRows}<form class="inline-form goal-form" data-form="goal" data-day="${key}"><input class="inline-input" type="text" name="goal" maxlength="150" required autocomplete="off" placeholder="Add a small, doable goal…" aria-label="Add a goal for tomorrow"/><select class="inline-time-select" name="slot" aria-label="Choose a time for this goal">${timeOptions}</select><button class="inline-submit" type="submit" aria-label="Add goal for tomorrow">${icon('plus', 16)}</button></form></div>
       </div>
     </section>`;
   }
@@ -944,9 +958,9 @@
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">TOMORROW · ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase())}</p><h1>Give tomorrow<br/><span>a head start.</span></h1><p>Plan the day hour by hour. Add structure where it helps and leave breathing room where it does not.</p></div><div class="page-intro-action"><button class="button button-secondary" type="button" data-view="today">${icon('arrow-left', 15)} Back to today</button></div></header>
       <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : 'A roomier day is planned', 'check-circle', 'blue')}${renderStatCard('Hours with a plan', String(plannedHours), 'of 24', plannedHours ? 'Your day has a clear shape' : 'Start with one time block', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
       <div class="planner-layout"><div class="planner-sidebar">
-        <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
+        <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus" data-day="${key}"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
         <section class="card planner-habits-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div><p class="card-overline">ALREADY IN YOUR ROUTINE</p><h2>Habits due tomorrow</h2></div></div><p class="planner-card-copy">Your scheduled habits are included automatically.</p>${habitsContent}</section>
-      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">AN INTENTIONAL DAY</p><h2>Tomorrow, hour by hour</h2><p>Every hour is visible. Tap an open slot to add a task at that exact time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-dayparts">${hourlyTimeline}</div><form class="planner-add-form" data-form="goal"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a task…"/><label class="sr-only" for="planner-slot-input">Choose a start hour</label><select class="form-control" id="planner-slot-input" name="slot">${timeOptions}</select><label class="sr-only" for="planner-duration-input">Choose duration</label><select class="form-control planner-duration-select" id="planner-duration-input" name="duration">${durationOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
+      </div><section class="card planner-schedule-card"><div class="planner-schedule-header"><div><p class="card-overline">AN INTENTIONAL DAY</p><h2>Tomorrow, hour by hour</h2><p>Every hour is visible. Tap an open slot to add a task at that exact time.</p></div><span class="planner-date-chip">${icon('calendar', 13)} ${escapeHtml(formatDate(tomorrow, { month: 'short', day: 'numeric' }))}</span></div><div class="planner-dayparts">${hourlyTimeline}</div><form class="planner-add-form" data-form="goal" data-day="${key}"><label class="sr-only" for="planner-goal-input">Add a task for tomorrow</label><input class="form-control" id="planner-goal-input" name="goal" type="text" maxlength="150" required autocomplete="off" placeholder="Add a task…"/><label class="sr-only" for="planner-slot-input">Choose a start hour</label><select class="form-control" id="planner-slot-input" name="slot">${timeOptions}</select><label class="sr-only" for="planner-duration-input">Choose duration</label><select class="form-control planner-duration-select" id="planner-duration-input" name="duration">${durationOptions}</select><button class="button button-primary" type="submit">${icon('plus', 15)} Add task</button></form></section></div>
       <p class="page-footnote">Plans are suggestions, not rules. Tomorrow can change—and so can this plan.</p>
     </div>`;
   }
@@ -968,6 +982,7 @@
       <div class="dashboard-grid">
         <div class="dashboard-column">${renderHabitsCard()}${renderWeeklyCard()}</div>
         <div class="dashboard-column">${renderChallengeCard()}${renderFocusCard()}${renderFocusTimerCard()}</div>
+        ${renderTodayPlanCard(todayKey)}
         ${renderTomorrowCard()}
         ${renderMoodCard()}
       </div>
@@ -1097,7 +1112,7 @@
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">NOTICE THE SMALL WINS</p><h1>Your progress,<br/><span>at a glance.</span></h1><p>Look back with curiosity, not judgment. Every check-in is evidence that you made time for yourself.</p></div></header>
       <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', `${average}%`, '', 'Average of your daily habits', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), 'of 30', 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Completed with your timer', 'clock', 'violet')}</section>
       <div class="insights-layout"><div class="insights-main">
-        <section class="card insights-chart-card" aria-labelledby="month-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="month-chart-title">A month of little wins</h2><p>Daily completion for the last 30 days.</p></div></div><span class="chart-period">${icon('calendar', 12)} 30 days</span></div><div class="chart-summary"><strong>${monthlyAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across the last 30 days. ${escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels" aria-hidden="true"><span>${formatDate(series[0].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[9].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[19].date, { month: 'short', day: 'numeric' })}</span><span>Today</span></div></div></section>
+        <section class="card insights-chart-card" aria-labelledby="month-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="month-chart-title">A month of little wins</h2><p>Scheduled habit completion for the last 30 days, through today.</p></div></div><span class="chart-period">${icon('calendar', 12)} 30 days</span></div><div class="chart-summary"><strong>${monthlyAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across the last 30 days. ${escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels" aria-hidden="true"><span>${formatDate(series[0].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[9].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[19].date, { month: 'short', day: 'numeric' })}</span><span>Today</span></div></div></section>
         <div class="insights-bottom"><section class="card heatmap-card"><div class="card-heading-copy"><h2 class="card-title">Your consistency map</h2><p class="heatmap-intro">Planned days brighten as you check habits off; rest days stay quiet.</p></div>${renderHeatmap(series)}<div class="heatmap-legend"><span>Less</span><i class="heat-cell" data-level="0"></i><i class="heat-cell" data-level="1"></i><i class="heat-cell" data-level="2"></i><i class="heat-cell" data-level="3"></i><i class="heat-cell" data-level="4"></i><span>More</span></div></section><section class="card consistency-card"><div class="card-heading-copy"><h2 class="card-title">Habit consistency</h2><p class="heatmap-intro">Days completed in the last 30.</p></div>${renderConsistencyList(series)}</section></div>
       </div><aside class="insight-aside"><section class="card insight-note-card"><span class="insight-note-icon">${icon('sparkles', 19)}</span><h2>${insightHeading}</h2><p>${insightCopy}</p><div class="insight-callout">${icon('lightbulb', 14)}<span>Consistency is built in ordinary moments, not perfect ones.</span></div></section>${renderMoodInsight(series)}<section class="card insight-note-card"><span class="insight-note-icon">${icon('target', 19)}</span><h2>Keep it gentle.</h2><p>Try choosing just one habit to focus on this week. Once it feels natural, you can add another.</p><button class="button button-secondary button-small" type="button" data-view="habits" style="margin-top:15px">Review your habits ${icon('arrow', 13)}</button></section></aside></div>
       <p class="page-footnote">Your progress belongs to you. The numbers are here to help, never to judge.</p>
@@ -1145,8 +1160,8 @@
     }, 2600);
   }
 
-  function toggleHabit(habitId) {
-    const key = getTodayKey();
+  function toggleHabit(habitId, dayKey = getTodayKey()) {
+    const key = isDateKey(dayKey) ? dayKey : getTodayKey();
     if (!scheduledHabitsOn(key).some((habit) => habit.id === habitId)) return;
     if (!state.logs[key]) state.logs[key] = {};
     const wasChecked = Boolean(state.logs[key][habitId]);
@@ -1254,10 +1269,10 @@
     renderApp();
   }
 
-  function selectMood(moodId) {
+  function selectMood(moodId, dayKey = getTodayKey()) {
     const mood = MOODS.find((item) => item.id === moodId);
     if (!mood) return;
-    const key = getTodayKey();
+    const key = isDateKey(dayKey) ? dayKey : getTodayKey();
     selectedMoodDay = key;
     selectedMood = mood.id;
     document.querySelectorAll('.mood-choice').forEach((button) => {
@@ -1320,7 +1335,7 @@
         break;
       }
       case 'toggle-habit':
-        toggleHabit(id);
+        toggleHabit(id, actionElement.dataset.day);
         break;
       case 'toggle-goal':
         toggleGoal(actionElement.dataset.day, id);
@@ -1340,7 +1355,7 @@
         window.requestAnimationFrame(() => document.querySelector('input[name="focus"]')?.focus());
         break;
       case 'toggle-focus': {
-        const key = getTodayKey();
+        const key = isDateKey(actionElement.dataset.day) ? actionElement.dataset.day : getTodayKey();
         if (!state.focus[key]) return;
         state.focus[key].done = !state.focus[key].done;
         saveState();
@@ -1357,7 +1372,7 @@
         setFocusTimerPreset(actionElement.dataset.minutes);
         break;
       case 'select-mood':
-        selectMood(id);
+        selectMood(id, actionElement.dataset.day);
         break;
       case 'focus-planner-hour': {
         const slotInput = document.getElementById('planner-slot-input');
@@ -1457,7 +1472,7 @@
     if (formType === 'goal') {
       const text = String(formData.get('goal') || '').trim().slice(0, 150);
       if (!text) return;
-      const key = dateKey(getTomorrowDate());
+      const key = isDateKey(form.dataset.day) ? form.dataset.day : dateKey(getTomorrowDate());
       const selectedSlot = formData.get('slot');
       const slot = PLAN_HOURS.includes(selectedSlot) ? selectedSlot : '09:00';
       const duration = normalizeGoalDuration(formData.get('duration'));
@@ -1477,7 +1492,7 @@
     if (formType === 'focus') {
       const text = String(formData.get('focus') || '').trim().slice(0, 150);
       if (!text) return;
-      const key = getTodayKey();
+      const key = isDateKey(form.dataset.day) ? form.dataset.day : getTodayKey();
       state.focus[key] = { text, done: state.focus[key]?.done || false };
       editingFocus = false;
       saveState();
@@ -1489,7 +1504,7 @@
     if (formType === 'tomorrow-focus') {
       const text = String(formData.get('focus') || '').trim().slice(0, 150);
       if (!text) return;
-      const key = dateKey(getTomorrowDate());
+      const key = isDateKey(form.dataset.day) ? form.dataset.day : dateKey(getTomorrowDate());
       state.focus[key] = { text, done: false };
       saveState();
       renderApp();
@@ -1498,7 +1513,7 @@
     }
 
     if (formType === 'reflection') {
-      const key = getTodayKey();
+      const key = isDateKey(form.dataset.day) ? form.dataset.day : getTodayKey();
       const note = String(formData.get('note') || '').trim().slice(0, 280);
       const mood = selectedMoodDay === key ? selectedMood : state.reflections[key]?.mood || '';
       if (!mood && !note) {
@@ -1531,6 +1546,25 @@
     editingFocus = false;
     renderApp();
     window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+
+  function refreshForNewDay() {
+    if (getTodayKey() !== lastRenderedDay) {
+      const editingForm = document.activeElement?.closest?.('form[data-form]');
+      if (editingForm) {
+        window.setTimeout(refreshForNewDay, 30_000);
+        return;
+      }
+      renderApp();
+    }
+    scheduleDayChangeCheck();
+  }
+
+  function scheduleDayChangeCheck() {
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0);
+    const delay = Math.max(1_000, nextMidnight.getTime() - now.getTime());
+    window.setTimeout(refreshForNewDay, delay);
   }
 
   document.addEventListener('click', (event) => {
@@ -1576,5 +1610,6 @@
   // Use the local calendar date for all summaries and keep the shell's icons accessible.
   hydrateStaticIcons();
   renderApp();
+  scheduleDayChangeCheck();
   if (state.timer.endsAt) startTimerTicker();
 })();
