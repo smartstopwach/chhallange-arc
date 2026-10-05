@@ -71,6 +71,7 @@
   const TIMER_PRESETS = [15, 25, 45];
   const PLAN_HOURS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
   const HABIT_TIMES = [...PLAN_HOURS, 'Anytime'];
+  const HABIT_END_TIMES = Array.from({ length: 24 }, (_, index) => `${String(index + 1).padStart(2, '0')}:00`);
   const GOAL_DURATIONS = [1, 2, 3, 4];
   const PLAN_DAYPARTS = [
     { name: 'Overnight', range: 'Quiet hours', icon: 'moon', hours: [0, 1, 2, 3, 4, 5] },
@@ -245,24 +246,88 @@
     return 'Anytime';
   }
 
-  function formatHabitTime(value) {
-    const normalized = normalizeHabitTime(value);
-    if (normalized === 'Anytime') return normalized;
-    const startHour = Number(normalized.slice(0, 2));
-    const endHour = (startHour + 1) % 24;
+  function habitTimeMinutes(value) {
+    if (value === '24:00') return 24 * 60;
+    if (!PLAN_HOURS.includes(value)) return null;
+    return Number(value.slice(0, 2)) * 60;
+  }
+
+  function defaultHabitEndTime(startTime) {
+    if (startTime === 'Anytime') return 'Anytime';
+    const nextHour = Number(startTime.slice(0, 2)) + 1;
+    return `${String(nextHour).padStart(2, '0')}:00`;
+  }
+
+  function normalizeHabitEndTime(value, startTime) {
+    if (startTime === 'Anytime') return 'Anytime';
+    const startMinutes = habitTimeMinutes(startTime);
+    return HABIT_END_TIMES.includes(value) && habitTimeMinutes(value) > startMinutes
+      ? value
+      : defaultHabitEndTime(startTime);
+  }
+
+  function formatHabitTime(value, endValue) {
+    const startTime = normalizeHabitTime(value);
+    if (startTime === 'Anytime') return startTime;
+    const endTime = normalizeHabitEndTime(endValue, startTime);
+    const startHour = Number(startTime.slice(0, 2));
+    const endHour = Number(endTime.slice(0, 2));
     const clockPart = (hour) => `${hour % 12 || 12}:00`;
-    const period = (hour) => hour < 12 ? 'AM' : 'PM';
+    const period = (hour) => hour % 24 < 12 ? 'AM' : 'PM';
+    if (startHour === 0 && endHour === 24) return '12:00 AM–12:00 AM next day';
     return period(startHour) === period(endHour)
       ? `${clockPart(startHour)}–${clockPart(endHour)} ${period(startHour)}`
       : `${clockPart(startHour)} ${period(startHour)}–${clockPart(endHour)} ${period(endHour)}`;
   }
 
+  function renderHabitEndTimeOptions(startTime, selectedEndTime = '') {
+    const startMinutes = habitTimeMinutes(startTime);
+    const availableEndTimes = startMinutes === null
+      ? []
+      : HABIT_END_TIMES.filter((time) => habitTimeMinutes(time) > startMinutes);
+    return `<option value="" disabled${selectedEndTime ? '' : ' selected'}>Choose end time</option>${availableEndTimes.map((time) => {
+      const label = time === '24:00' ? '12:00 AM (midnight)' : formatClock(Number(time.slice(0, 2)));
+      return `<option value="${time}"${selectedEndTime === time ? ' selected' : ''}>${label}</option>`;
+    }).join('')}`;
+  }
+
+  function refreshHabitEndTimeOptions(form) {
+    const startSelect = form?.querySelector('[name="startTime"]');
+    const endSelect = form?.querySelector('[name="endTime"]');
+    if (!startSelect || !endSelect) return;
+    const selectedEndTime = endSelect.value;
+    const startMinutes = habitTimeMinutes(startSelect.value);
+    const availableEndTimes = startMinutes === null
+      ? []
+      : HABIT_END_TIMES.filter((time) => habitTimeMinutes(time) > startMinutes);
+    endSelect.innerHTML = renderHabitEndTimeOptions(startSelect.value, availableEndTimes.includes(selectedEndTime) ? selectedEndTime : '');
+  }
+
+  function findHabitScheduleConflict(candidate, excludedHabitId = '') {
+    const candidateStart = habitTimeMinutes(candidate.time);
+    const candidateEnd = habitTimeMinutes(candidate.endTime);
+    if (candidateStart === null || candidateEnd === null) return null;
+    for (const habit of state.habits) {
+      if (habit.id === excludedHabitId || habit.time === 'Anytime') continue;
+      const sharedDays = candidate.days.filter((day) => habit.days.includes(day));
+      if (!sharedDays.length) continue;
+      const start = habitTimeMinutes(habit.time);
+      const end = habitTimeMinutes(habit.endTime);
+      if (start !== null && end !== null && candidateStart < end && start < candidateEnd) {
+        return { habit, days: sharedDays };
+      }
+    }
+    return null;
+  }
+
   function isUnmodifiedSuggestion(habit, suggestion) {
+    const suggestedStart = normalizeHabitTime(suggestion.time);
     return habit.templateId !== suggestion.id
       && habit.name === suggestion.name
       && habit.detail === suggestion.detail
       && habit.category === suggestion.category
-      && habit.time === normalizeHabitTime(suggestion.time)
+      && habit.time === suggestedStart
+      && habit.endTime === defaultHabitEndTime(suggestedStart)
       && habit.icon === suggestion.icon
       && JSON.stringify(habit.days) === JSON.stringify(suggestion.days);
   }
@@ -277,7 +342,8 @@
     const name = String(habit.name || '').trim().slice(0, 56);
     if (!name) return null;
     const category = CATEGORIES.includes(habit.category) ? habit.category : 'Other';
-    const time = normalizeHabitTime(habit.time);
+    const time = normalizeHabitTime(habit.startTime || habit.time);
+    const endTime = normalizeHabitEndTime(habit.endTime, time);
     const validIcons = Object.values(CATEGORY_ICONS);
     const selectedDays = Array.isArray(habit.days)
       ? [...new Set(habit.days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
@@ -288,6 +354,7 @@
       detail: String(habit.detail || '').trim().slice(0, 100),
       category,
       time,
+      endTime,
       templateId: typeof habit.templateId === 'string' ? habit.templateId.slice(0, 100) : '',
       icon: validIcons.includes(habit.icon) ? habit.icon : CATEGORY_ICONS[category],
       days: selectedDays.length ? selectedDays : [0, 1, 2, 3, 4, 5, 6],
@@ -780,7 +847,7 @@
     const streakLabel = streakDays
       ? `${streakDays} scheduled habit day${streakDays === 1 ? '' : 's'} in a row`
       : 'No active streak yet';
-    const scheduledTime = formatHabitTime(habit.time);
+    const scheduledTime = formatHabitTime(habit.time, habit.endTime);
     const meta = managed
       ? `<div class="management-row-meta"><span class="category-pill">${escapeHtml(habit.category)}</span><span class="habit-time">${icon('clock', 10)}${escapeHtml(scheduledTime)}</span><span class="schedule-pill" title="${escapeHtml(formatSchedule(habit.days))}">${escapeHtml(formatSchedule(habit.days))}</span><span class="habit-streak-pill${streakDays ? ' is-active' : ''}" aria-label="${escapeHtml(streakLabel)}" title="${escapeHtml(streakLabel)}">${icon('flame', 11)}<strong>${streakDays}</strong><small>${streakDays === 1 ? 'day' : 'days'}</small></span>${renderHabitWeekStrip(habit)}</div>`
       : '';
@@ -1042,7 +1109,7 @@
       return `<section class="planner-daypart"><header class="planner-block-heading"><span class="planner-block-icon">${icon(part.icon, 17)}</span><span class="planner-block-title"><strong>${part.name}</strong><small>${part.range}</small></span><span class="planner-block-count">${partGoals.length}</span></header><div class="planner-hour-list">${hours}</div></section>`;
     }).join('');
     const habitsContent = habits.length
-      ? `<ul class="planner-habit-list">${habits.map((habit) => `<li><span class="habit-symbol tone-${getHabitIcon(habit)}">${icon(getHabitIcon(habit), 16)}</span><span><strong>${escapeHtml(habit.name)}</strong><small>${escapeHtml(formatHabitTime(habit.time))} · ${escapeHtml(habit.category)}</small></span></li>`).join('')}</ul>`
+      ? `<ul class="planner-habit-list">${habits.map((habit) => `<li><span class="habit-symbol tone-${getHabitIcon(habit)}">${icon(getHabitIcon(habit), 16)}</span><span><strong>${escapeHtml(habit.name)}</strong><small>${escapeHtml(formatHabitTime(habit.time, habit.endTime))} · ${escapeHtml(habit.category)}</small></span></li>`).join('')}</ul>`
       : state.habits.length
         ? `<div class="planner-rest-note">${icon('moon', 16)}<span>No habits scheduled. Tomorrow is a planned rest day.</span></div>`
         : `<div class="planner-rest-note">${icon('checklist', 16)}<span>No habits chosen yet. <button class="button-link" type="button" data-view="habits">Choose what fits ${icon('arrow', 12)}</button></span></div>`;
@@ -1276,13 +1343,18 @@
     const category = existing?.category || suggestion?.category || 'Wellness';
     const activeDays = Array.isArray(existing?.days) ? existing.days : suggestion?.days || [0, 1, 2, 3, 4, 5, 6];
     const selectedTime = existing?.time || '';
+    const selectedStartTime = selectedTime === 'Anytime' ? '' : selectedTime;
+    const selectedEndTime = selectedStartTime ? existing?.endTime || '' : '';
     const categoryOptions = CATEGORIES.map((option) => `<option value="${option}"${category === option ? ' selected' : ''}>${option}</option>`).join('');
-    const timeOptions = `<option value="" disabled${selectedTime ? '' : ' selected'}>Choose a time range</option><option value="Anytime"${selectedTime === 'Anytime' ? ' selected' : ''}>Anytime · no fixed time</option><optgroup label="Choose a one-hour range">${PLAN_HOURS.map((hour) => `<option value="${hour}"${selectedTime === hour ? ' selected' : ''}>${formatHabitTime(hour)}</option>`).join('')}</optgroup>`;
+    const startTimeOptions = `<option value="" disabled${selectedStartTime ? '' : ' selected'}>Choose start time</option>${PLAN_HOURS.map((hour) => `<option value="${hour}"${selectedStartTime === hour ? ' selected' : ''}>${formatClock(Number(hour.slice(0, 2)))}</option>`).join('')}`;
+    const endTimeOptions = renderHabitEndTimeOptions(selectedStartTime, selectedEndTime);
     const dayOptions = WEEKDAYS.map((day) => `<label class="weekday-option" title="${WEEKDAY_NAMES[day.value]}"><input type="checkbox" name="days" value="${day.value}" aria-label="${WEEKDAY_NAMES[day.value]}"${activeDays.includes(day.value) ? ' checked' : ''}/><span>${day.label}</span></label>`).join('');
-    const modalIntro = suggestion
-      ? 'Choose the one-hour range that fits this habit. It will not be added until you save.'
-      : 'Keep it simple, specific, and kind to your future self.';
-    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>${modalIntro}</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}" data-suggestion-id="${suggestion ? escapeHtml(suggestion.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || suggestion?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || suggestion?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-time-input">Time range <span style="color:var(--subtle);font-weight:400">(one hour)</span></label><div class="modal-select-wrap"><select class="form-control" id="habit-time-input" name="time" required>${timeOptions}</select></div></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
+    const modalIntro = existing?.time === 'Anytime'
+      ? 'Set a start and end time for this habit. Its previous schedule had no fixed time.'
+      : suggestion
+        ? 'Choose when this habit starts and ends. Its time cannot overlap another habit on the same days.'
+        : 'Choose a start and end time. Habits on the same days cannot overlap.';
+    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>${modalIntro}</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}" data-suggestion-id="${suggestion ? escapeHtml(suggestion.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || suggestion?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || suggestion?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><span class="form-label">Time range</span><div class="habit-time-range-fields"><div class="modal-field"><label class="form-label" for="habit-start-time-input">Start time</label><div class="modal-select-wrap"><select class="form-control" id="habit-start-time-input" name="startTime" required>${startTimeOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-end-time-input">End time</label><div class="modal-select-wrap"><select class="form-control" id="habit-end-time-input" name="endTime" required>${endTimeOptions}</select></div></div></div><p class="form-help">End time must be later than start. Ranges on the same days cannot overlap.</p></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
     document.body.classList.add('has-modal');
     window.requestAnimationFrame(() => document.getElementById('habit-name-input')?.focus());
   }
@@ -1612,12 +1684,12 @@
       const name = String(formData.get('name') || '').trim().slice(0, 56);
       const detail = String(formData.get('detail') || '').trim().slice(0, 100);
       const category = CATEGORIES.includes(formData.get('category')) ? formData.get('category') : 'Other';
-      const selectedTime = formData.get('time');
-      if (!HABIT_TIMES.includes(selectedTime)) {
-        showToast('Choose a time range or Anytime before saving.');
+      const time = formData.get('startTime');
+      const endTime = formData.get('endTime');
+      if (!PLAN_HOURS.includes(time) || !HABIT_END_TIMES.includes(endTime) || habitTimeMinutes(endTime) <= habitTimeMinutes(time)) {
+        showToast('Choose a valid start and end time.');
         return;
       }
-      const time = selectedTime;
       const selectedDays = typeof formData.getAll === 'function'
         ? [...new Set(formData.getAll('days').map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
         : [0, 1, 2, 3, 4, 5, 6];
@@ -1630,8 +1702,14 @@
         showToast('That habit is already in your routine.');
         return;
       }
+      const conflict = findHabitScheduleConflict({ time, endTime, days }, existing?.id || '');
+      if (conflict) {
+        const overlappingDays = conflict.days.map((day) => WEEKDAY_NAMES[day]).join(', ');
+        showToast(`Time overlaps with “${conflict.habit.name}” on ${overlappingDays}. Adjust the range or repeat days.`);
+        return;
+      }
       if (existing) {
-        Object.assign(existing, { name, detail, category, time, icon: CATEGORY_ICONS[category], days });
+        Object.assign(existing, { name, detail, category, time, endTime, icon: CATEGORY_ICONS[category], days });
         habitSearchQuery = '';
         habitCategoryFilter = 'All';
         saveState();
@@ -1639,14 +1717,14 @@
         renderApp();
         showToast('Your habit has been updated.');
       } else {
-        state.habits.push({ id: suggestion?.id || randomId(), templateId: suggestion?.id || '', name, detail, category, time, icon: CATEGORY_ICONS[category], days, createdAt: getTodayKey() });
+        state.habits.push({ id: suggestion?.id || randomId(), templateId: suggestion?.id || '', name, detail, category, time, endTime, icon: CATEGORY_ICONS[category], days, createdAt: getTodayKey() });
         if (suggestion) state.skippedHabitSuggestions = state.skippedHabitSuggestions.filter((suggestionId) => suggestionId !== suggestion.id);
         habitSearchQuery = '';
         habitCategoryFilter = 'All';
         saveState();
         closeModal();
         renderApp();
-        showToast(suggestion ? 'Your chosen habit is ready with its time set.' : 'A new habit is ready when you are.');
+        showToast(suggestion ? 'Your chosen habit is ready with its time range set.' : 'Your new habit is ready with its time range set.');
       }
       return;
     }
@@ -1780,6 +1858,11 @@
     }
   });
   document.addEventListener('change', (event) => {
+    const startTime = event.target.closest('[name="startTime"]');
+    if (startTime) {
+      refreshHabitEndTimeOptions(startTime.closest('form[data-form="habit"]'));
+      return;
+    }
     const categoryFilter = event.target.closest('#habit-category-filter');
     if (!categoryFilter) return;
     habitCategoryFilter = CATEGORIES.includes(categoryFilter.value) ? categoryFilter.value : 'All';

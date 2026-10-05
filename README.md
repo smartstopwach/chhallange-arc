@@ -18,8 +18,8 @@ On supported Chrome/Edge browsers, select **Install** when the button appears or
 
 ## Features
 
-- Daily habit checklist with one-hour due-time ranges beside each tick, categories, and custom weekday schedules
-- No habits are preloaded: optional starter ideas can be added, skipped, or restored; custom habits are always available, and setup asks for a one-hour time range (or Anytime) and repeat schedule before saving
+- Daily habit checklist with start-to-end due-time ranges beside each tick, categories, and custom weekday schedules
+- No habits are preloaded: optional starter ideas can be added, skipped, or restored; custom habits are always available, and setup asks for start and end times and repeat days; overlapping ranges on shared days are blocked
 - Searchable, category-filtered habit library with per-habit streaks and a seven-day check-in trail
 - Overall streaks, a smooth 7-day activity line chart, and selectable 30-day or 1-year Insights with daily line charts, range-aware summaries, and a matching consistency map
 - Flexible 7-, 14-, 30-, and 60-day challenges

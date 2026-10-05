@@ -1067,6 +1067,8 @@ svg { display: block; }
 .modal-field { display: grid; gap: 6px; }
 .modal-field .form-label { margin: 0; }
 .modal-field textarea.form-control { min-height: 77px; resize: vertical; }
+.habit-time-range-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.habit-time-range-fields > .modal-field { min-width: 0; }
 .weekday-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .weekday-picker { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
 .weekday-option { position: relative; display: grid; min-height: 38px; place-items: center; border: 1px solid #343d35; border-radius: 9px; background: #191e1a; color: #909a91; cursor: pointer; font-size: 10px; font-weight: 700; transition: border-color .15s ease, background .15s ease, color .15s ease; }
