@@ -18,7 +18,7 @@
     <script type="module" src="firebase-client.js"></script>
     <script src="pwa.js" defer></script>
   </head>
-  <body>
+  <body class="auth-gated">
     <div class="app-shell">
       <aside class="sidebar" aria-label="Main sidebar">
         <div class="sidebar-head">
@@ -115,7 +115,17 @@
         </header>
 
         <div class="page-container" id="page-container" tabindex="-1">
-          <div id="app-content"></div>
+          <div id="app-content">
+            <main class="auth-gate auth-gate-loading" aria-busy="true">
+              <section class="auth-panel auth-loading-panel" aria-live="polite">
+                <span class="brand-mark auth-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+                <p class="auth-eyebrow">DAYMARK · YOUR PRIVATE WORKSPACE</p>
+                <span class="auth-spinner" aria-hidden="true"></span>
+                <h1>Restoring your<br/><span>workspace.</span></h1>
+                <p>Checking your secure sign-in. Your habits and plans are waiting.</p>
+              </section>
+            </main>
+          </div>
         </div>
       </main>
     </div>
