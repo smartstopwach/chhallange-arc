@@ -1078,7 +1078,7 @@
       : skipped
         ? `<span class="suggestion-choice-status is-skipped">Not for me</span><button class="button button-quiet button-small" type="button" data-action="restore-habit-suggestion" data-id="${escapeHtml(suggestion.id)}">Undo</button>`
         : `<button class="button button-secondary button-small" type="button" data-action="add-suggested-habit" data-id="${escapeHtml(suggestion.id)}" aria-label="Add ${name} to my habits">${icon('plus', 13)} Add this</button><button class="suggestion-skip-button" type="button" data-action="skip-habit-suggestion" data-id="${escapeHtml(suggestion.id)}" aria-label="Not for me: ${name}">Not for me</button>`;
-    return `<article class="habit-suggestion-card${added ? ' is-added' : skipped ? ' is-skipped' : ''}"><div class="suggestion-card-top"><span class="habit-symbol tone-${symbol}">${icon(symbol, 17)}</span><span class="category-pill">${escapeHtml(suggestion.category)}</span></div><div class="suggestion-card-copy"><h3>${name}</h3><p>${escapeHtml(suggestion.detail)}</p></div><div class="suggestion-card-meta">${escapeHtml(suggestion.time)} <span>·</span> Every day</div><div class="suggestion-card-actions">${actions}</div></article>`;
+    return `<article class="habit-suggestion-card${added ? ' is-added' : skipped ? ' is-skipped' : ''}"><div class="suggestion-card-top"><span class="habit-symbol tone-${symbol}">${icon(symbol, 17)}</span><span class="category-pill">${escapeHtml(suggestion.category)}</span></div><div class="suggestion-card-copy"><h3>${name}</h3><p>${escapeHtml(suggestion.detail)}</p></div><div class="suggestion-card-meta">Suggested time: ${escapeHtml(suggestion.time)} <span>·</span> Every day</div><div class="suggestion-card-actions">${actions}</div></article>`;
   }
 
   function renderHabitSuggestions() {
@@ -1239,15 +1239,20 @@
     </div>`;
   }
 
-  function openHabitModal(habitId = '') {
+  function openHabitModal(habitId = '', suggestionId = '') {
     const existing = state.habits.find((habit) => habit.id === habitId);
-    const title = existing ? 'Edit your habit' : 'Add a new habit';
-    const category = existing?.category || 'Wellness';
-    const activeDays = Array.isArray(existing?.days) ? existing.days : [0, 1, 2, 3, 4, 5, 6];
+    const suggestion = makeHabitSuggestions().find((habit) => habit.id === suggestionId);
+    const title = existing ? 'Edit your habit' : suggestion ? 'Make this habit yours' : 'Add a new habit';
+    const category = existing?.category || suggestion?.category || 'Wellness';
+    const activeDays = Array.isArray(existing?.days) ? existing.days : suggestion?.days || [0, 1, 2, 3, 4, 5, 6];
+    const selectedTime = existing?.time || '';
     const categoryOptions = CATEGORIES.map((option) => `<option value="${option}"${category === option ? ' selected' : ''}>${option}</option>`).join('');
-    const timeOptions = TIMES.map((option) => `<option value="${option}"${(existing?.time || 'Anytime') === option ? ' selected' : ''}>${option}</option>`).join('');
+    const timeOptions = `<option value="" disabled${selectedTime ? '' : ' selected'}>Choose a time</option>${TIMES.map((option) => `<option value="${option}"${selectedTime === option ? ' selected' : ''}>${option}</option>`).join('')}`;
     const dayOptions = WEEKDAYS.map((day) => `<label class="weekday-option" title="${WEEKDAY_NAMES[day.value]}"><input type="checkbox" name="days" value="${day.value}" aria-label="${WEEKDAY_NAMES[day.value]}"${activeDays.includes(day.value) ? ' checked' : ''}/><span>${day.label}</span></label>`).join('');
-    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>Keep it simple, specific, and kind to your future self.</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-time-input">Best time</label><div class="modal-select-wrap"><select class="form-control" id="habit-time-input" name="time">${timeOptions}</select></div></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
+    const modalIntro = suggestion
+      ? 'Choose when this fits your day. It will not be added until you save.'
+      : 'Keep it simple, specific, and kind to your future self.';
+    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>${modalIntro}</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}" data-suggestion-id="${suggestion ? escapeHtml(suggestion.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || suggestion?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || suggestion?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-time-input">Best time <span style="color:var(--subtle);font-weight:400">(choose one)</span></label><div class="modal-select-wrap"><select class="form-control" id="habit-time-input" name="time" required>${timeOptions}</select></div></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
     document.body.classList.add('has-modal');
     window.requestAnimationFrame(() => document.getElementById('habit-name-input')?.focus());
   }
@@ -1442,13 +1447,7 @@
       case 'add-suggested-habit': {
         const suggestion = makeHabitSuggestions().find((habit) => habit.id === id);
         if (!suggestion || state.habits.some((habit) => habit.id === id)) return;
-        state.habits.push({ ...suggestion, days: [...suggestion.days], createdAt: getTodayKey() });
-        state.skippedHabitSuggestions = state.skippedHabitSuggestions.filter((suggestionId) => suggestionId !== id);
-        habitSearchQuery = '';
-        habitCategoryFilter = 'All';
-        saveState();
-        renderApp();
-        showToast(`“${suggestion.name}” is now in your habits.`);
+        openHabitModal('', id);
         break;
       }
       case 'skip-habit-suggestion':
@@ -1583,13 +1582,24 @@
       const name = String(formData.get('name') || '').trim().slice(0, 56);
       const detail = String(formData.get('detail') || '').trim().slice(0, 100);
       const category = CATEGORIES.includes(formData.get('category')) ? formData.get('category') : 'Other';
-      const time = TIMES.includes(formData.get('time')) ? formData.get('time') : 'Anytime';
+      const selectedTime = formData.get('time');
+      if (!TIMES.includes(selectedTime)) {
+        showToast('Choose the time of day that works for this habit.');
+        return;
+      }
+      const time = selectedTime;
       const selectedDays = typeof formData.getAll === 'function'
         ? [...new Set(formData.getAll('days').map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
         : [0, 1, 2, 3, 4, 5, 6];
       const days = selectedDays.length ? selectedDays : [0, 1, 2, 3, 4, 5, 6];
       if (!name) return;
       const existing = state.habits.find((habit) => habit.id === form.dataset.id);
+      const suggestion = makeHabitSuggestions().find((habit) => habit.id === form.dataset.suggestionId);
+      if (suggestion && state.habits.some((habit) => habit.id === suggestion.id)) {
+        closeModal();
+        showToast('That habit is already in your routine.');
+        return;
+      }
       if (existing) {
         Object.assign(existing, { name, detail, category, time, icon: CATEGORY_ICONS[category], days });
         habitSearchQuery = '';
@@ -1599,13 +1609,14 @@
         renderApp();
         showToast('Your habit has been updated.');
       } else {
-        state.habits.push({ id: randomId(), name, detail, category, time, icon: CATEGORY_ICONS[category], days, createdAt: getTodayKey() });
+        state.habits.push({ id: suggestion?.id || randomId(), name, detail, category, time, icon: CATEGORY_ICONS[category], days, createdAt: getTodayKey() });
+        if (suggestion) state.skippedHabitSuggestions = state.skippedHabitSuggestions.filter((suggestionId) => suggestionId !== suggestion.id);
         habitSearchQuery = '';
         habitCategoryFilter = 'All';
         saveState();
         closeModal();
         renderApp();
-        showToast('A new habit is ready when you are.');
+        showToast(suggestion ? 'Your chosen habit is ready with its time set.' : 'A new habit is ready when you are.');
       }
       return;
     }
