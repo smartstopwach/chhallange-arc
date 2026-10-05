@@ -165,7 +165,11 @@
     return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
   }
 
-  function isDateKey(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value); }
+  function isDateKey(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
 
   function dateFromKey(key) {
     const [year, month, day] = String(key).split('-').map(Number);
@@ -385,9 +389,10 @@
       const challenge = savedChallengeDefinition || CHALLENGES[0];
       const sessions = normalizeSessions(saved.sessions);
       const timer = normalizeTimer(saved.timer);
-      if (timer.justFinished) sessions[dateKey(new Date())] = (sessions[dateKey(new Date())] || 0) + 1;
+      const recoveredFinishedTimer = timer.justFinished;
+      if (recoveredFinishedTimer) sessions[dateKey(new Date())] = (sessions[dateKey(new Date())] || 0) + 1;
       delete timer.justFinished;
-      return {
+      const normalizedState = {
         version: 2,
         name: typeof saved.name === 'string' ? saved.name.trim().slice(0, 32) : '',
         habits,
@@ -402,6 +407,14 @@
           startDate: savedChallengeDefinition && isDateKey(savedChallenge.startDate) ? savedChallenge.startDate : dateKey(new Date()),
         },
       };
+      if (recoveredFinishedTimer) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizedState));
+        } catch (_) {
+          // Keep the recovered session in memory if browser storage is unavailable.
+        }
+      }
+      return normalizedState;
     } catch (error) {
       console.warn('Daymark could not load saved data; starting with a fresh workspace.', error);
       return defaults;
@@ -1201,7 +1214,12 @@
     if (status) status.textContent = 'Stay with one thing. You have got this.';
   }
 
+  function settleElapsedFocusTimer() {
+    if (state.timer.endsAt && getTimerRemaining() <= 0) updateFocusTimer();
+  }
+
   function toggleFocusTimer() {
+    settleElapsedFocusTimer();
     if (isTimerRunning()) {
       state.timer.remaining = getTimerRemaining();
       state.timer.endsAt = null;
@@ -1217,6 +1235,7 @@
   }
 
   function resetFocusTimer() {
+    settleElapsedFocusTimer();
     state.timer.endsAt = null;
     state.timer.remaining = state.timer.duration;
     saveState();
@@ -1225,7 +1244,9 @@
 
   function setFocusTimerPreset(minutes) {
     const duration = Number(minutes) * 60;
-    if (isTimerRunning() || !TIMER_PRESETS.includes(Number(minutes))) return;
+    if (!TIMER_PRESETS.includes(Number(minutes))) return;
+    settleElapsedFocusTimer();
+    if (isTimerRunning()) return;
     state.timer.duration = duration;
     state.timer.remaining = duration;
     state.timer.endsAt = null;
@@ -1382,6 +1403,8 @@
         editingFocus = false;
         selectedMoodDay = '';
         selectedMood = '';
+        habitSearchQuery = '';
+        habitCategoryFilter = 'All';
         reflectionDraftDay = '';
         reflectionDraft = '';
         saveState();
@@ -1413,6 +1436,8 @@
       const existing = state.habits.find((habit) => habit.id === form.dataset.id);
       if (existing) {
         Object.assign(existing, { name, detail, category, time, icon: CATEGORY_ICONS[category], days });
+        habitSearchQuery = '';
+        habitCategoryFilter = 'All';
         saveState();
         closeModal();
         renderApp();
