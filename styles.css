@@ -599,6 +599,8 @@ svg { display: block; }
 .activity-chart-axis span:nth-child(1) { top: 7.4%; }
 .activity-chart-axis span:nth-child(2) { top: 46.3%; }
 .activity-chart-axis span:nth-child(3) { top: 85.2%; }
+.activity-chart-empty { display: grid; min-width: 0; grid-column: 2; grid-row: 1; place-content: center; justify-items: center; gap: 8px; padding: 14px; border: 1px dashed #394439; border-radius: 11px; background: linear-gradient(145deg, rgb(34 41 34 / 58%), rgb(25 30 26 / 68%)); color: #8e9b8e; font-size: 10px; line-height: 1.5; text-align: center; }
+.activity-chart-empty svg { width: 20px; height: 20px; color: #b9d794; }
 .activity-line-plot { position: relative; min-width: 0; grid-column: 2; grid-row: 1; overflow: visible; border-radius: 11px; background: linear-gradient(180deg, rgb(197 238 120 / 3%), rgb(197 238 120 / 0%) 78%); }
 .activity-line-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .activity-grid-line { stroke: #2a322a; stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -864,7 +866,33 @@ svg { display: block; }
 .check-toggle:disabled { border-style: dashed; background: #1a1e1a; cursor: not-allowed; opacity: .45; }
 .category-pill { padding: 3px 7px; border-color: #354036; background: #242b24; color: #a1b198; }
 .habit-management-empty { display: grid; min-height: 205px; place-items: center; padding: 25px; text-align: center; }
-.habit-management-empty .button { margin-top: 12px; }
+.habit-management-empty .button, .habit-empty .button { margin-top: 12px; }
+.habit-suggestions { margin-top: 15px; padding: 19px 20px 20px; background: radial-gradient(ellipse at 100% 0, rgb(197 238 120 / 5%), transparent 44%), linear-gradient(145deg, #1c211d, #191d1a); }
+.habit-suggestions-heading { display: flex; align-items: flex-start; gap: 11px; }
+.habit-suggestions-heading .card-heading-icon { flex: 0 0 auto; }
+.habit-suggestions-heading .card-overline { margin: 1px 0 5px; }
+.habit-suggestions-heading .card-heading-copy h2 { font-size: 15px; }
+.habit-suggestions-heading .card-heading-copy > p:last-child { max-width: 560px; }
+.habit-suggestion-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.habit-suggestion-card { display: grid; min-width: 0; grid-template-rows: auto 1fr auto auto; align-content: start; gap: 11px; padding: 14px; border: 1px solid #303831; border-radius: 12px; background: linear-gradient(145deg, #202620, #1b201c); transition: border-color .18s ease, transform .18s ease, background .18s ease; }
+.habit-suggestion-card:hover { border-color: #465541; background: linear-gradient(145deg, #242d23, #1c221d); transform: translateY(-1px); }
+.habit-suggestion-card.is-added { border-color: #3b4b33; background: linear-gradient(145deg, #222a20, #1b211c); }
+.habit-suggestion-card.is-skipped { border-style: dashed; opacity: .78; }
+.suggestion-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.suggestion-card-top .habit-symbol { width: 34px; height: 34px; border-radius: 10px; }
+.suggestion-card-top .habit-symbol svg { width: 17px; height: 17px; }
+.suggestion-card-copy h3 { margin: 0; color: #e1e9df; font-size: 11px; font-weight: 700; line-height: 1.45; }
+.suggestion-card-copy p { margin: 5px 0 0; color: #869185; font-size: 9px; line-height: 1.5; }
+.suggestion-card-meta { display: flex; align-items: center; gap: 6px; color: #768276; font-size: 8px; font-weight: 600; }
+.suggestion-card-meta span { color: #a2b38d; }
+.suggestion-card-actions { display: flex; min-height: 34px; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 10px; border-top: 1px solid #2c342d; }
+.suggestion-card-actions .button { min-height: 32px; padding-inline: 9px; font-size: 9px; }
+.suggestion-skip-button { min-height: 34px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: #858f84; font: inherit; font-size: 9px; font-weight: 600; cursor: pointer; }
+.suggestion-skip-button:hover { background: #292e29; color: #e2e9df; }
+.suggestion-skip-button:focus-visible { outline: 2px solid #c5ee78; outline-offset: 2px; }
+.suggestion-choice-status { display: inline-flex; align-items: center; gap: 5px; color: #9eab99; font-size: 9px; font-weight: 600; }
+.suggestion-choice-status svg { width: 14px; height: 14px; color: #bedb96; }
+.suggestion-choice-status.is-skipped { color: #8b958a; }
 .tips-card { padding: 20px; background: linear-gradient(145deg, #20271e, #1a1f1b); }
 .tips-card h2 { margin: 10px 0 7px; color: #e8eee4; font-family: 'Manrope', sans-serif; font-size: 17px; letter-spacing: -.4px; }
 .tips-card > p { margin: 0; color: #929d91; font-size: 10px; line-height: 1.65; }
@@ -1160,6 +1188,7 @@ body.has-modal { overflow: hidden; }
   .tomorrow-intro { padding-bottom: 12px; border-bottom: 1px solid #2b322c; }
   .tomorrow-progress { margin-top: 12px; }
   .management-layout, .insights-layout, .settings-layout, .planner-layout { grid-template-columns: minmax(0, 1fr); }
+  .habit-suggestion-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .active-challenge-panel { grid-template-columns: minmax(0, 1fr) 138px; gap: 10px; padding: 21px; }
   .active-challenge-ring, .active-challenge-ring svg { width: 125px; height: 125px; }
   .challenge-library-grid { gap: 10px; }
@@ -1231,6 +1260,9 @@ body.has-modal { overflow: hidden; }
   .reflection-footer { align-items: flex-start; }
   .management-card, .tips-card, .settings-card, .settings-side-card { padding: 16px 15px; }
   .habit-library-toolbar { grid-template-columns: minmax(0, 1fr); gap: 7px; margin-top: 14px; }
+  .habit-suggestion-grid { grid-template-columns: minmax(0, 1fr); }
+  .habit-suggestions { padding: 16px 14px; }
+  .suggestion-card-actions .button { flex: 1 1 auto; }
   .management-card .habit-row { gap: 9px; }
   .management-card .habit-time { display: none; }
   .habit-row-actions .icon-button { width: 25px; height: 27px; }

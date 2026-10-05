@@ -200,15 +200,14 @@
   function longDate(date) { return formatDate(date, { weekday: 'long', month: 'long', day: 'numeric' }); }
   function compactDate(date) { return formatDate(date, { weekday: 'short', month: 'short', day: 'numeric' }); }
 
-  function makeStarterHabits() {
-    const createdAt = dateKey(new Date());
+  function makeHabitSuggestions() {
     const everyDay = [0, 1, 2, 3, 4, 5, 6];
     return [
-      { id: 'habit-water', name: 'Drink a full glass of water', detail: 'Before your first coffee', category: 'Wellness', time: 'Morning', icon: 'water', days: [...everyDay], createdAt },
-      { id: 'habit-move', name: 'Move for 20 minutes', detail: 'A walk totally counts', category: 'Movement', time: 'Anytime', icon: 'move', days: [...everyDay], createdAt },
-      { id: 'habit-read', name: 'Read 10 pages', detail: 'A little every day adds up', category: 'Learning', time: 'Evening', icon: 'book', days: [...everyDay], createdAt },
-      { id: 'habit-mindful', name: 'Take a mindful pause', detail: 'Try five slow breaths', category: 'Mindfulness', time: 'Afternoon', icon: 'mind', days: [...everyDay], createdAt },
-      { id: 'habit-rest', name: 'Start winding down by 10:30', detail: 'Give tomorrow-you a head start', category: 'Rest', time: 'Evening', icon: 'moon', days: [...everyDay], createdAt },
+      { id: 'habit-water', name: 'Drink a full glass of water', detail: 'Before your first coffee', category: 'Wellness', time: 'Morning', icon: 'water', days: [...everyDay] },
+      { id: 'habit-move', name: 'Move for 20 minutes', detail: 'A walk totally counts', category: 'Movement', time: 'Anytime', icon: 'move', days: [...everyDay] },
+      { id: 'habit-read', name: 'Read 10 pages', detail: 'A little every day adds up', category: 'Learning', time: 'Evening', icon: 'book', days: [...everyDay] },
+      { id: 'habit-mindful', name: 'Take a mindful pause', detail: 'Try five slow breaths', category: 'Mindfulness', time: 'Afternoon', icon: 'mind', days: [...everyDay] },
+      { id: 'habit-rest', name: 'Start winding down by 10:30', detail: 'Give tomorrow-you a head start', category: 'Rest', time: 'Evening', icon: 'moon', days: [...everyDay] },
     ];
   }
 
@@ -217,7 +216,8 @@
     return {
       version: 2,
       name: '',
-      habits: makeStarterHabits(),
+      habits: [],
+      skippedHabitSuggestions: [],
       logs: {},
       goals: {},
       focus: {},
@@ -229,6 +229,21 @@
   }
 
   function isRecord(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+
+  function normalizeSkippedHabitSuggestions(value) {
+    if (!Array.isArray(value)) return [];
+    const suggestionIds = new Set(makeHabitSuggestions().map((habit) => habit.id));
+    return [...new Set(value.map(String).filter((id) => suggestionIds.has(id)))];
+  }
+
+  function isUnmodifiedSuggestion(habit, suggestion) {
+    return habit.name === suggestion.name
+      && habit.detail === suggestion.detail
+      && habit.category === suggestion.category
+      && habit.time === suggestion.time
+      && habit.icon === suggestion.icon
+      && JSON.stringify(habit.days) === JSON.stringify(suggestion.days);
+  }
 
   function randomId() {
     if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
@@ -383,9 +398,17 @@
       if (!raw) return defaults;
       const saved = JSON.parse(raw);
       if (!isRecord(saved)) return defaults;
-      const habits = Array.isArray(saved.habits)
+      const logs = normalizeLogs(saved.logs);
+      const suggestions = makeHabitSuggestions();
+      const normalizedHabits = Array.isArray(saved.habits)
         ? saved.habits.map(normalizeHabit).filter(Boolean)
         : defaults.habits;
+      const habits = normalizedHabits.filter((habit) => {
+        const suggestion = suggestions.find((item) => item.id === habit.id);
+        if (!suggestion || !isUnmodifiedSuggestion(habit, suggestion)) return true;
+        const hasHistory = Object.values(logs).some((record) => record[habit.id] === true);
+        return hasHistory;
+      });
       const savedChallenge = isRecord(saved.challenge) ? saved.challenge : {};
       const savedChallengeDefinition = CHALLENGES.find((item) => item.id === savedChallenge.id);
       const challenge = savedChallengeDefinition || CHALLENGES[0];
@@ -398,7 +421,8 @@
         version: 2,
         name: typeof saved.name === 'string' ? saved.name.trim().slice(0, 32) : '',
         habits,
-        logs: normalizeLogs(saved.logs),
+        skippedHabitSuggestions: normalizeSkippedHabitSuggestions(saved.skippedHabitSuggestions),
+        logs,
         goals: normalizeGoals(saved.goals),
         focus: normalizeFocus(saved.focus),
         reflections: normalizeReflections(saved.reflections),
@@ -487,6 +511,9 @@
 
   function getCurrentStreak() {
     if (!state.habits.length) return 0;
+    const earliestCreatedAt = state.habits.every((habit) => isDateKey(habit.createdAt))
+      ? state.habits.map((habit) => habit.createdAt).sort()[0]
+      : '';
     let date = new Date();
     const todayKey = dateKey(date);
     if (scheduledHabitsOn(todayKey).length && !hasCheckin(todayKey)) date = addDays(date, -1);
@@ -496,6 +523,7 @@
     while (checkedDays < 3660 && scannedDays < 3660) {
       scannedDays += 1;
       const key = dateKey(date);
+      if (earliestCreatedAt && key < earliestCreatedAt) break;
       if (!scheduledHabitsOn(key).length) {
         date = addDays(date, -1);
         continue;
@@ -686,10 +714,11 @@
     const weekly = getAverage(getLastDays(7));
     const tomorrowGoals = state.goals[dateKey(getTomorrowDate())] || [];
     const doneGoals = tomorrowGoals.filter((goal) => goal.done).length;
+    const hasHabits = state.habits.length > 0;
     return `<section class="stats-grid" aria-label="Your daily stats">
       ${renderStatCard('Current streak', String(getCurrentStreak()), 'days', getCurrentStreak() ? 'A little progress, every day' : 'Start with one small win', 'flame', 'amber')}
-      ${renderStatCard("Today's progress", todayHabits.length ? `${percent}%` : '—', '', todayHabits.length ? `${done} of ${todayHabits.length} habits due today` : 'A well-earned rest day', 'check-circle', 'lime')}
-      ${renderStatCard('7-day average', `${weekly}%`, '', 'Rest days do not lower your average', 'chart', 'blue')}
+      ${renderStatCard("Today's progress", todayHabits.length ? `${percent}%` : '—', '', todayHabits.length ? `${done} of ${todayHabits.length} habits due today` : hasHabits ? 'A well-earned rest day' : 'Choose which habits to track', 'check-circle', 'lime')}
+      ${renderStatCard('7-day average', hasHabits ? `${weekly}%` : '—', '', hasHabits ? 'Rest days do not lower your average' : 'Choose a habit to start your history', 'chart', 'blue')}
       ${renderStatCard("Tomorrow's plan", String(tomorrowGoals.length), 'goals', tomorrowGoals.length ? `${doneGoals} checked off so far` : 'Give tomorrow a head start', 'calendar', 'violet')}
     </section>`;
   }
@@ -757,15 +786,18 @@
       ? `<ul class="habit-list">${todayHabits.map((habit) => renderHabitRow(habit)).join('')}</ul>`
       : state.habits.length
         ? `<div class="habit-empty"><div><span class="habit-empty-icon">${icon('moon', 20)}</span><strong>Nothing due today. Enjoy the breathing room.</strong><p>Your next habit day is ${nextHabitDay ? escapeHtml(formatDate(nextHabitDay, { weekday: 'long', month: 'short', day: 'numeric' })) : 'coming up soon'}. Rest days are part of a good routine.</p></div></div>`
-        : `<div class="habit-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong>Start with a habit that feels doable.</strong><p>There is no perfect routine. Add one small thing you would like to make time for.</p></div></div>`;
+        : `<div class="habit-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong>No habits chosen yet.</strong><p>Pick only the ideas that feel right. Nothing is tracked until you choose it.</p><button class="button button-primary button-small" type="button" data-view="habits">${icon('checklist', 14)} Choose your habits</button></div></div>`;
+    const progressSummary = total
+      ? `<strong>${done}</strong> / ${total} due <span class="progress-percent">${percent}%</span>`
+      : state.habits.length ? '<strong>0</strong> / 0 due' : '<strong>Choose what fits</strong>';
     return `<section class="card card-pad habits-card" aria-labelledby="today-habits-title">
       <div class="card-header">
-        <div class="card-heading"><span class="card-heading-icon">${icon('check-square', 18)}</span><div class="card-heading-copy"><h2 id="today-habits-title">Today's habits</h2><p>${total ? 'A few small promises, just for today.' : 'Your schedule should leave room to breathe.'}</p></div></div>
-        <button class="button-link" type="button" data-view="habits">Manage ${icon('arrow', 14)}</button>
+        <div class="card-heading"><span class="card-heading-icon">${icon('check-square', 18)}</span><div class="card-heading-copy"><h2 id="today-habits-title">Today's habits</h2><p>${total ? 'A few small promises, just for today.' : state.habits.length ? 'Your schedule should leave room to breathe.' : 'Nothing is pre-selected.'}</p></div></div>
+        <button class="button-link" type="button" data-view="habits">${state.habits.length ? 'Manage' : 'Choose habits'} ${icon('arrow', 14)}</button>
       </div>
-      <div class="habit-progress-block"><div class="progress-meta"><span>Daily progress</span><span><strong>${done}</strong> / ${total} due${total ? ` <span class="progress-percent">${percent}%</span>` : ''}</span></div><div class="progress-track" role="progressbar" aria-label="Today's habit completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div></div>
+      <div class="habit-progress-block"><div class="progress-meta"><span>Daily progress</span><span>${progressSummary}</span></div><div class="progress-track" role="progressbar" aria-label="Today's habit completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div></div>
       ${content}
-      <div class="card-note">${icon('sparkles', 13)}<span>${total ? 'Done is better than perfect. Even one check-in counts.' : 'Rest is part of your plan, too.'}</span></div>
+      <div class="card-note">${icon('sparkles', 13)}<span>${total ? 'Done is better than perfect. Even one check-in counts.' : state.habits.length ? 'Rest is part of your plan, too.' : 'Nothing gets added automatically. Your routine is yours to choose.'}</span></div>
     </section>`;
   }
 
@@ -862,15 +894,21 @@
     const series = getLastDays(7);
     const average = getAverage(series);
     const trackedSeries = series.filter((item) => item.scheduled > 0);
+    const hasTrackedDays = trackedSeries.length > 0;
     const bestDay = trackedSeries.reduce((best, item) => item.percent > (best?.percent ?? -1) ? item : best, null);
     const hasActivity = series.some((item) => item.checkin);
-    const chartDescription = series.map((item) => `${formatDate(item.date, { weekday: 'long' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
+    const chartDescription = hasTrackedDays
+      ? series.map((item) => `${formatDate(item.date, { weekday: 'long' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ')
+      : 'No habits have been chosen yet.';
+    const chartPlot = hasTrackedDays
+      ? renderActivityPlot(series, 'week-activity')
+      : `<div class="activity-chart-empty">${icon('checklist', 18)}<span>Choose habits to start your progress line.</span></div>`;
     const labels = series.map((item) => `<span${item.key === getTodayKey() ? ' class="is-today"' : ''}>${escapeHtml(formatDate(item.date, { weekday: 'short' }).replace('.', ''))}</span>`).join('');
     return `<section class="card chart-card" aria-labelledby="weekly-chart-title">
-      <div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="weekly-chart-title">Your week, in rhythm</h2><p>Scheduled habit completion through today; rest days are not counted.</p></div></div><span class="chart-period">${icon('calendar', 12)} 7 days</span></div>
-      <div class="chart-summary"><strong>${average}%</strong><span>average completion</span><span class="chart-legend">Habits done</span></div>
-      <div class="activity-chart" role="img" aria-label="Habit completion over the last seven days, average ${average} percent. ${escapeHtml(chartDescription)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${renderActivityPlot(series, 'week-activity')}<div class="activity-day-labels" aria-hidden="true">${labels}</div></div>
-      <div class="chart-foot">${hasActivity && bestDay ? `<span>Best day: <strong>${escapeHtml(formatDate(bestDay.date, { weekday: 'long' }))}</strong></span><button class="button-link" type="button" data-view="insights">More insights ${icon('arrow', 13)}</button>` : `<span class="chart-empty-message">Your first check-in will bring this chart to life.</span><button class="button-link" type="button" data-view="insights">See insights ${icon('arrow', 13)}</button>`}</div>
+      <div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="weekly-chart-title">Your week, in rhythm</h2><p>${hasTrackedDays ? 'Scheduled habit completion through today; rest days are not counted.' : 'Choose only the habits you want; nothing is pre-filled.'}</p></div></div><span class="chart-period">${icon('calendar', 12)} 7 days</span></div>
+      <div class="chart-summary"><strong>${hasTrackedDays ? `${average}%` : '—'}</strong><span>average completion</span><span class="chart-legend">Habits done</span></div>
+      <div class="activity-chart" role="img" aria-label="${hasTrackedDays ? `Habit completion over the last seven days, average ${average} percent. ${escapeHtml(chartDescription)}` : 'No habits selected yet. Choose habits to start tracking your progress.'}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chartPlot}<div class="activity-day-labels" aria-hidden="true">${labels}</div></div>
+      <div class="chart-foot">${hasTrackedDays && hasActivity && bestDay ? `<span>Best day: <strong>${escapeHtml(formatDate(bestDay.date, { weekday: 'long' }))}</strong></span><button class="button-link" type="button" data-view="insights">More insights ${icon('arrow', 13)}</button>` : `<span class="chart-empty-message">${hasTrackedDays ? 'Your first check-in will bring this chart to life.' : 'Your progress line appears after you add a habit.'}</span><button class="button-link" type="button" data-view="insights">See insights ${icon('arrow', 13)}</button>`}</div>
     </section>`;
   }
 
@@ -975,10 +1013,12 @@
     }).join('');
     const habitsContent = habits.length
       ? `<ul class="planner-habit-list">${habits.map((habit) => `<li><span class="habit-symbol tone-${getHabitIcon(habit)}">${icon(getHabitIcon(habit), 16)}</span><span><strong>${escapeHtml(habit.name)}</strong><small>${escapeHtml(habit.time)} · ${escapeHtml(habit.category)}</small></span></li>`).join('')}</ul>`
-      : `<div class="planner-rest-note">${icon('moon', 16)}<span>No habits scheduled. Tomorrow is a planned rest day.</span></div>`;
+      : state.habits.length
+        ? `<div class="planner-rest-note">${icon('moon', 16)}<span>No habits scheduled. Tomorrow is a planned rest day.</span></div>`
+        : `<div class="planner-rest-note">${icon('checklist', 16)}<span>No habits chosen yet. <button class="button-link" type="button" data-view="habits">Choose what fits ${icon('arrow', 12)}</button></span></div>`;
     return `<div class="planner-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">TOMORROW · ${escapeHtml(formatDate(tomorrow, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase())}</p><h1>Give tomorrow<br/><span>a head start.</span></h1><p>Plan the day hour by hour. Add structure where it helps and leave breathing room where it does not.</p></div><div class="page-intro-action"><button class="button button-secondary" type="button" data-view="today">${icon('arrow-left', 15)} Back to today</button></div></header>
-      <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : 'A roomier day is planned', 'check-circle', 'blue')}${renderStatCard('Hours with a plan', String(plannedHours), 'of 24', plannedHours ? 'Your day has a clear shape' : 'Start with one time block', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
+      <section class="stats-grid" aria-label="Tomorrow plan summary">${renderStatCard('Tasks planned', String(goals.length), 'tasks', goals.length ? `${completed} already checked` : 'Add a few doable steps', 'list', 'lime')}${renderStatCard('Habits on the calendar', String(habits.length), 'habits', habits.length ? 'Already part of your rhythm' : state.habits.length ? 'Planned rest day' : 'Nothing chosen yet', 'check-circle', 'blue')}${renderStatCard('Hours with a plan', String(plannedHours), 'of 24', plannedHours ? 'Your day has a clear shape' : 'Start with one time block', 'clock', 'amber')}${renderStatCard('Main priority', priority ? 'Set' : 'Open', '', priority ? 'One clear intention' : 'Choose one important thing', 'target', 'violet')}</section>
       <div class="planner-layout"><div class="planner-sidebar">
         <section class="card planner-priority-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('target', 18)}</span><div><p class="card-overline">ONE IMPORTANT THING</p><h2>Tomorrow's priority</h2></div></div><p class="planner-card-copy">If tomorrow goes well because of one thing, what should it be?</p><form class="planner-priority-form" data-form="tomorrow-focus" data-day="${key}"><input class="form-control" name="focus" maxlength="150" required autocomplete="off" placeholder="Name the one thing…" aria-label="Tomorrow's main priority" value="${escapeHtml(priority?.text || '')}"/><button class="button button-primary button-small" type="submit">${priority ? 'Update priority' : 'Save priority'} ${icon('check', 13)}</button></form></section>
         <section class="card planner-habits-card"><div class="planner-card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div><p class="card-overline">ALREADY IN YOUR ROUTINE</p><h2>Habits due tomorrow</h2></div></div><p class="planner-card-copy">Your scheduled habits are included automatically.</p>${habitsContent}</section>
@@ -991,14 +1031,15 @@
     const todayKey = getTodayKey();
     const done = completedHabitsOn(todayKey);
     const total = scheduledHabitsOn(todayKey).length;
+    const hasHabits = state.habits.length > 0;
     const percent = completionPercent(todayKey) ?? 0;
     const challenge = getCurrentChallenge();
     const nameGreeting = state.name ? `Welcome back, ${escapeHtml(state.name)}.` : 'A fresh start is waiting—no perfect routine required.';
-    const ring = ringMarkup(percent, 'small', 'hero-ring-wrap', `<div class="hero-ring-copy"><strong>${total ? `${percent}%` : '—'}</strong><span>${total ? 'today' : 'rest day'}</span></div>`);
+    const ring = ringMarkup(percent, 'small', 'hero-ring-wrap', `<div class="hero-ring-copy"><strong>${total ? `${percent}%` : '—'}</strong><span>${total ? 'today' : hasHabits ? 'rest day' : 'your choice'}</span></div>`);
     return `<div class="today-view">
       <section class="hero" aria-labelledby="home-title">
-        <div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span><span>${escapeHtml(longDate(new Date()).toUpperCase())}</span><span class="eyebrow-divider">·</span><span>DAY ${getChallengeDay()} OF ${challenge.duration}</span></div><h1 id="home-title">Make today<br/><span>count.</span></h1><p>${nameGreeting} Small promises, kept often, become a life that feels more like yours.</p><div class="hero-actions"><button class="button button-primary" type="button" data-action="add-habit">${icon('plus', 16)} Add a habit</button><button class="button-link" type="button" data-view="insights">See your progress ${icon('arrow', 14)}</button></div></div>
-        <div class="hero-visual" aria-label="${total ? `${percent} percent of today's scheduled habits complete` : 'Today is a rest day'}">${ring}<div class="hero-progress-copy"><span>Today's rhythm</span><strong>${total ? `${done} of ${total} due` : 'Room to reset'}</strong><small>${done === total && total ? 'You showed up for yourself.' : total ? 'Every little bit moves you forward.' : 'A good routine makes room to rest.'}</small></div></div>
+        <div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span><span>${escapeHtml(longDate(new Date()).toUpperCase())}</span><span class="eyebrow-divider">·</span><span>DAY ${getChallengeDay()} OF ${challenge.duration}</span></div><h1 id="home-title">Make today<br/><span>count.</span></h1><p>${nameGreeting} Small promises, kept often, become a life that feels more like yours.</p><div class="hero-actions">${hasHabits ? `<button class="button button-primary" type="button" data-action="add-habit">${icon('plus', 16)} Add a habit</button>` : `<button class="button button-primary" type="button" data-view="habits">${icon('checklist', 16)} Choose your habits</button>`}<button class="button-link" type="button" data-view="insights">See your progress ${icon('arrow', 14)}</button></div></div>
+        <div class="hero-visual" aria-label="${total ? `${percent} percent of today's scheduled habits complete` : hasHabits ? 'Today is a rest day' : 'No habits chosen yet; nothing is tracked automatically'}">${ring}<div class="hero-progress-copy"><span>Today's rhythm</span><strong>${total ? `${done} of ${total} due` : hasHabits ? 'Room to reset' : 'Choose what fits'}</strong><small>${done === total && total ? 'You showed up for yourself.' : total ? 'Every little bit moves you forward.' : hasHabits ? 'A good routine makes room to rest.' : 'Nothing is added until you say yes.'}</small></div></div>
       </section>
       ${renderTodayStats()}
       <div class="dashboard-grid">
@@ -1022,9 +1063,26 @@
   }
 
   function renderHabitLibraryContent(filteredHabits = getFilteredHabits()) {
-    if (!state.habits.length) return `<div class="habit-management-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong class="habit-name">Your list is a blank page.</strong><p class="habit-detail">Add one small habit to begin shaping your routine.</p><button class="button button-primary button-small" type="button" data-action="add-habit">${icon('plus', 14)} Add your first habit</button></div></div>`;
+    if (!state.habits.length) return `<div class="habit-management-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong class="habit-name">Nothing is pre-selected.</strong><p class="habit-detail">Choose an idea below or create your own. Daymark will only track habits you add.</p><button class="button button-primary button-small" type="button" data-action="add-habit">${icon('plus', 14)} Create a custom habit</button></div></div>`;
     if (!filteredHabits.length) return `<div class="habit-filter-empty"><span class="habit-empty-icon">${icon('search', 18)}</span><strong>No habits found</strong><p>Try a different name or category. Your habits are still here.</p><button class="button-link" type="button" data-action="clear-habit-filters">Clear search and filters ${icon('close', 13)}</button></div>`;
     return `<ul class="habit-list">${filteredHabits.map((habit) => renderHabitRow(habit, { managed: true })).join('')}</ul>`;
+  }
+
+  function renderHabitSuggestionCard(suggestion) {
+    const added = state.habits.some((habit) => habit.id === suggestion.id);
+    const skipped = state.skippedHabitSuggestions.includes(suggestion.id);
+    const symbol = getHabitIcon(suggestion);
+    const name = escapeHtml(suggestion.name);
+    const actions = added
+      ? `<span class="suggestion-choice-status is-added">${icon('check-circle', 14)} Already in your habits</span>`
+      : skipped
+        ? `<span class="suggestion-choice-status is-skipped">Not for me</span><button class="button button-quiet button-small" type="button" data-action="restore-habit-suggestion" data-id="${escapeHtml(suggestion.id)}">Undo</button>`
+        : `<button class="button button-secondary button-small" type="button" data-action="add-suggested-habit" data-id="${escapeHtml(suggestion.id)}" aria-label="Add ${name} to my habits">${icon('plus', 13)} Add this</button><button class="suggestion-skip-button" type="button" data-action="skip-habit-suggestion" data-id="${escapeHtml(suggestion.id)}" aria-label="Not for me: ${name}">Not for me</button>`;
+    return `<article class="habit-suggestion-card${added ? ' is-added' : skipped ? ' is-skipped' : ''}"><div class="suggestion-card-top"><span class="habit-symbol tone-${symbol}">${icon(symbol, 17)}</span><span class="category-pill">${escapeHtml(suggestion.category)}</span></div><div class="suggestion-card-copy"><h3>${name}</h3><p>${escapeHtml(suggestion.detail)}</p></div><div class="suggestion-card-meta">${escapeHtml(suggestion.time)} <span>·</span> Every day</div><div class="suggestion-card-actions">${actions}</div></article>`;
+  }
+
+  function renderHabitSuggestions() {
+    return `<section class="card habit-suggestions" aria-labelledby="habit-suggestions-title"><div class="habit-suggestions-heading"><span class="card-heading-icon">${icon('sparkles', 18)}</span><div class="card-heading-copy"><p class="card-overline">OPTIONAL STARTING IDEAS</p><h2 id="habit-suggestions-title">Choose what fits you</h2><p>These are only ideas. Nothing is added or tracked unless you choose it.</p></div></div><div class="habit-suggestion-grid">${makeHabitSuggestions().map(renderHabitSuggestionCard).join('')}</div></section>`;
   }
 
   function updateHabitLibrary() {
@@ -1036,7 +1094,7 @@
     if (count) {
       count.textContent = state.habits.length
         ? `${filteredHabits.length} of ${state.habits.length} habit${state.habits.length === 1 ? '' : 's'}`
-        : 'Add a habit to start your personal library';
+        : 'No habits chosen yet';
     }
   }
 
@@ -1047,15 +1105,18 @@
     const dueToday = scheduledHabitsOn(getTodayKey()).length;
     const todayPercent = dueToday ? Math.round((done / dueToday) * 100) : 0;
     const categoryOptions = ['All', ...CATEGORIES].map((category) => `<option value="${escapeHtml(category)}"${category === habitCategoryFilter ? ' selected' : ''}>${category === 'All' ? 'All categories' : escapeHtml(category)}</option>`).join('');
-    const resultCount = total ? `${filteredHabits.length} of ${total} habit${total === 1 ? '' : 's'}` : 'Add a habit to start your personal library';
+    const resultCount = total ? `${filteredHabits.length} of ${total} habit${total === 1 ? '' : 's'}` : 'No habits chosen yet';
+    const habitToolbar = total ? `<div class="habit-library-toolbar"><label class="habit-search-field"><span>${icon('search', 15)}</span><input class="form-control" id="habit-search" type="search" autocomplete="off" placeholder="Search habits…" aria-label="Search your habits" value="${escapeHtml(habitSearchQuery)}"/></label><label class="sr-only" for="habit-category-filter">Filter by category</label><select class="form-control habit-category-filter" id="habit-category-filter">${categoryOptions}</select></div>` : '';
     const content = renderHabitLibraryContent(filteredHabits);
+    const completionLabel = dueToday ? `${todayPercent}%` : total ? 'Rest day' : 'Choose habits';
     return `<div class="habits-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">YOUR DAILY RHYTHM</p><h1>Habits that fit<br/><span>your real life.</span></h1><p>Make your routine personal. Small, repeatable actions are the ones that tend to stick.</p></div><div class="page-intro-action"><button class="button button-primary" type="button" data-action="add-habit">${icon('plus', 16)} New habit</button></div></header>
-      <section class="stats-grid" aria-label="Habit summary">${renderStatCard('Your habits', String(total), 'active', 'A routine built around you', 'list', 'lime')}${renderStatCard('Due today', String(dueToday), 'habits', `${done} checked · ${dueToday ? 'Daily rhythm' : 'Planned rest day'}`, 'check-circle', 'blue')}${renderStatCard('Current streak', String(getCurrentStreak()), 'days', getCurrentStreak() ? 'Keep your gentle momentum' : 'A new streak starts today', 'flame', 'amber')}${renderStatCard('Challenge day', String(getChallengeDay()), `of ${getCurrentChallenge().duration}`, getCurrentChallenge().name, 'flag', 'violet')}</section>
+      <section class="stats-grid" aria-label="Habit summary">${renderStatCard('Your habits', String(total), 'active', total ? 'A routine built around you' : 'Nothing added automatically', 'list', 'lime')}${renderStatCard('Due today', String(dueToday), 'habits', `${done} checked · ${dueToday ? 'Daily rhythm' : total ? 'Planned rest day' : 'Choose what fits'}`, 'check-circle', 'blue')}${renderStatCard('Current streak', String(getCurrentStreak()), 'days', getCurrentStreak() ? 'Keep your gentle momentum' : 'A new streak starts today', 'flame', 'amber')}${renderStatCard('Challenge day', String(getChallengeDay()), `of ${getCurrentChallenge().duration}`, getCurrentChallenge().name, 'flag', 'violet')}</section>
       <div class="management-layout">
-        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>Set a weekly rhythm. Rest days are built in.</p></div></div><span class="category-pill">${total} total</span></div><div class="habit-library-toolbar"><label class="habit-search-field"><span>${icon('search', 15)}</span><input class="form-control" id="habit-search" type="search" autocomplete="off" placeholder="Search habits…" aria-label="Search your habits" value="${escapeHtml(habitSearchQuery)}"/></label><label class="sr-only" for="habit-category-filter">Filter by category</label><select class="form-control habit-category-filter" id="habit-category-filter">${categoryOptions}</select></div><div class="habit-library-count" id="habit-library-count" aria-live="polite">${resultCount}</div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${dueToday ? `${todayPercent}%` : 'Rest day'}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div><div id="habit-library-results">${content}</div><div class="card-note">${icon('lock', 13)}<span>Your habit check-ins stay in this browser, on this device.</span></div></section>
+        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>${total ? 'Set a weekly rhythm. Rest days are built in.' : 'Only habits you choose appear here.'}</p></div></div><span class="category-pill">${total} total</span></div>${habitToolbar}<div class="habit-library-count" id="habit-library-count" aria-live="polite">${resultCount}</div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${completionLabel}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div><div id="habit-library-results">${content}</div><div class="card-note">${icon('lock', 13)}<span>Your habit check-ins stay in this browser, on this device.</span></div></section>
         <aside class="card tips-card"><span class="card-heading-icon">${icon('lightbulb', 18)}</span><h2>Make it easy to begin.</h2><p>You do not need a perfect plan. Make the next step small enough to repeat.</p><ol class="tip-list"><li class="tip-item"><span class="tip-number">01</span><span><strong>Start smaller than you think.</strong><small>Two minutes is enough to build the rhythm.</small></span></li><li class="tip-item"><span class="tip-number">02</span><span><strong>Give it a place in your day.</strong><small>Pair a new habit with something you already do.</small></span></li><li class="tip-item"><span class="tip-number">03</span><span><strong>Begin again, without guilt.</strong><small>A missed day is a pause, not a reset.</small></span></li></ol></aside>
       </div>
+      ${renderHabitSuggestions()}
       <p class="page-footnote">Your habits are yours to shape. Add, edit, or remove them whenever life changes.</p>
     </div>`;
   }
@@ -1079,8 +1140,12 @@
   }
 
   function renderInsightsChart(series = getLastDays(insightsRangeDays)) {
-    const description = series.length > 90 ? '' : series.map((item) => `${formatDate(item.date, { weekday: 'short', month: 'short', day: 'numeric' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
-    return { series, plot: renderActivityPlot(series, 'insights-activity'), description };
+    const hasTrackedDays = series.some((item) => item.scheduled > 0);
+    const description = series.length > 90 || !hasTrackedDays ? '' : series.map((item) => `${formatDate(item.date, { weekday: 'short', month: 'short', day: 'numeric' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
+    const plot = hasTrackedDays
+      ? renderActivityPlot(series, 'insights-activity')
+      : `<div class="activity-chart-empty">${icon('checklist', 18)}<span>Choose habits to start your progress line.</span></div>`;
+    return { series, plot, description, hasTrackedDays };
   }
 
   function renderHeatmap(series, isYear = false) {
@@ -1096,7 +1161,7 @@
   }
 
   function renderConsistencyList(series) {
-    if (!state.habits.length) return `<div class="insight-empty">${icon('sparkles', 14)}<span>Add a habit to see how your routines are taking shape.</span></div>`;
+    if (!state.habits.length) return `<div class="insight-empty">${icon('sparkles', 14)}<span>Choose a habit you want to track and your consistency will show here.</span></div>`;
     const habits = state.habits.map((habit) => {
       const dueDays = series.filter((item) => (!isDateKey(habit.createdAt) || item.key >= habit.createdAt) && habit.days.includes(item.date.getDay()));
       const count = dueDays.filter((item) => isCheckedOn(item.key, habit.id)).length;
@@ -1127,10 +1192,13 @@
     const rangeDescription = isYear ? 'the past year' : 'the last 30 days';
     const series = getLastDays(rangeDays);
     const average = getAverage(series.slice(-7));
+    const hasRecentTrackedDays = series.slice(-7).some((item) => item.scheduled > 0);
     const rangeAverage = getAverage(series);
     const checkins = series.filter((item) => item.checkin).length;
     const focusSessions = getSessionsForDays(rangeDays);
     const chart = renderInsightsChart(series);
+    const recentAverageLabel = hasRecentTrackedDays ? `${average}%` : '—';
+    const rangeAverageLabel = chart.hasTrackedDays ? `${rangeAverage}%` : '—';
     const mostConsistent = state.habits
       .map((habit) => ({
         habit,
@@ -1152,9 +1220,9 @@
     }).join('');
     return `<div class="insights-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">NOTICE THE SMALL WINS</p><h1>Your progress,<br/><span>at a glance.</span></h1><p>Look back with curiosity, not judgment. Every check-in is evidence that you made time for yourself.</p></div></header>
-      <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', `${average}%`, '', 'Average of your daily habits', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), `of ${rangeDays}`, 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Within this period', 'clock', 'violet')}</section>
+      <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', recentAverageLabel, '', hasRecentTrackedDays ? 'Average of your daily habits' : 'Choose a habit to start your history', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), `of ${rangeDays}`, 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Within this period', 'clock', 'violet')}</section>
       <div class="insights-layout"><div class="insights-main">
-        <section class="card insights-chart-card" aria-labelledby="range-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="range-chart-title">${isYear ? 'A year' : 'A month'} of little wins</h2><p>Scheduled habit completion for ${rangeDescription}, through today.</p></div></div><div class="insights-range-tools">${rangeButtons}<span class="chart-period">${icon('calendar', 12)} ${rangeLabel}</span></div></div><div class="chart-summary"><strong>${rangeAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across ${rangeLabel}, through today. ${isYear ? `${rangeAverage}% average completion and ${checkins} check-in days.` : escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels${isYear ? ' is-year-range' : ''}" aria-hidden="true">${xLabels}</div></div></section>
+        <section class="card insights-chart-card" aria-labelledby="range-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="range-chart-title">${isYear ? 'A year' : 'A month'} of little wins</h2><p>${chart.hasTrackedDays ? `Scheduled habit completion for ${rangeDescription}, through today.` : 'Nothing is tracked until you choose a habit.'}</p></div></div><div class="insights-range-tools">${rangeButtons}<span class="chart-period">${icon('calendar', 12)} ${rangeLabel}</span></div></div><div class="chart-summary"><strong>${rangeAverageLabel}</strong><span>${chart.hasTrackedDays ? 'average completion' : 'no habits selected'}</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="${chart.hasTrackedDays ? `Daily habit completion across ${rangeLabel}, through today. ${isYear ? `${rangeAverage}% average completion and ${checkins} check-in days.` : escapeHtml(chart.description)}` : 'No habits selected yet. Choose habits to start tracking your progress.'}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels${isYear ? ' is-year-range' : ''}" aria-hidden="true">${xLabels}</div></div></section>
         <div class="insights-bottom${isYear ? ' is-year-range' : ''}"><section class="card heatmap-card"><div class="card-heading-copy"><h2 class="card-title">Your consistency map</h2><p class="heatmap-intro">Planned days brighten as you check habits off; rest days stay quiet.</p></div>${renderHeatmap(series, isYear)}<div class="heatmap-legend"><span>Less</span><i class="heat-cell" data-level="0"></i><i class="heat-cell" data-level="1"></i><i class="heat-cell" data-level="2"></i><i class="heat-cell" data-level="3"></i><i class="heat-cell" data-level="4"></i><span>More</span></div></section><section class="card consistency-card"><div class="card-heading-copy"><h2 class="card-title">Habit consistency</h2><p class="heatmap-intro">Days completed within this period.</p></div>${renderConsistencyList(series)}</section></div>
       </div><aside class="insight-aside"><section class="card insight-note-card"><span class="insight-note-icon">${icon('sparkles', 19)}</span><h2>${insightHeading}</h2><p>${insightCopy}</p><div class="insight-callout">${icon('lightbulb', 14)}<span>Consistency is built in ordinary moments, not perfect ones.</span></div></section>${renderMoodInsight(series, isYear ? 'year' : 'month')}<section class="card insight-note-card"><span class="insight-note-icon">${icon('target', 19)}</span><h2>Keep it gentle.</h2><p>Try choosing just one habit to focus on this week. Once it feels natural, you can add another.</p><button class="button button-secondary button-small" type="button" data-view="habits" style="margin-top:15px">Review your habits ${icon('arrow', 13)}</button></section></aside></div>
       <p class="page-footnote">Your progress belongs to you. The numbers are here to help, never to judge.</p>
@@ -1166,7 +1234,7 @@
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">MAKE THIS SPACE YOURS</p><h1>A little more<br/><span>personal.</span></h1><p>Manage your profile and your saved progress. Your tracker works without an account.</p></div></header>
       <div class="settings-layout"><div class="settings-stack">
         <section class="card settings-card"><h2>Your profile</h2><p>Choose the name you would like to see around Daymark. This stays on this device.</p><form class="settings-form" data-form="profile"><div><label class="form-label" for="profile-name-input">Display name</label><input class="form-control" id="profile-name-input" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="What should we call you?" value="${escapeHtml(state.name)}"/><p class="form-help">Leave this empty if you prefer a quiet, nameless workspace.</p></div><button class="button button-primary button-small" type="submit">Save profile ${icon('check', 14)}</button></form></section>
-        <section class="card settings-card"><h2>Your data</h2><p>Your habits, schedules, moods, focus sessions, and plans are saved locally in this browser. Export a copy any time.</p><div class="data-action-list"><div class="data-action-row"><div class="data-action-copy"><strong>Export your data</strong><small>Download a JSON backup of your habits and progress.</small></div><button class="button button-secondary button-small" type="button" data-action="export">${icon('download', 14)} Export</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Clear activity</strong><small>Remove check-ins, mood notes, focus sessions, and tomorrow's goals. Keep your habits.</small></div><button class="button button-quiet button-small" type="button" data-action="clear-activity">Clear activity</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Start fresh</strong><small>Restore the starter habits and clear all saved progress.</small></div><button class="button button-danger button-small" type="button" data-action="reset-all">Reset app</button></div></div></section>
+        <section class="card settings-card"><h2>Your data</h2><p>Your habits, schedules, moods, focus sessions, and plans are saved locally in this browser. Export a copy any time.</p><div class="data-action-list"><div class="data-action-row"><div class="data-action-copy"><strong>Export your data</strong><small>Download a JSON backup of your habits and progress.</small></div><button class="button button-secondary button-small" type="button" data-action="export">${icon('download', 14)} Export</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Clear activity</strong><small>Remove check-ins, mood notes, focus sessions, and tomorrow's goals. Keep your habits.</small></div><button class="button button-quiet button-small" type="button" data-action="clear-activity">Clear activity</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Start fresh</strong><small>Clear saved progress and start with no active habits. Add only what you choose.</small></div><button class="button button-danger button-small" type="button" data-action="reset-all">Reset app</button></div></div></section>
       </div><aside class="card settings-side-card"><span class="privacy-icon">${icon('lock', 19)}</span><h2>Just for you.</h2><p>Daymark has no login, no server, and no tracking. Your information stays in your browser unless you choose to export it.</p><span class="local-storage-badge">${icon('check-circle', 12)} Saved on this device</span><div class="card-note" style="margin-top:20px">${icon('sparkles', 13)}<span>Your progress is private, personal, and always yours to keep.</span></div></aside></div>
     </div>`;
   }
@@ -1371,6 +1439,30 @@
       case 'add-habit':
         openHabitModal();
         break;
+      case 'add-suggested-habit': {
+        const suggestion = makeHabitSuggestions().find((habit) => habit.id === id);
+        if (!suggestion || state.habits.some((habit) => habit.id === id)) return;
+        state.habits.push({ ...suggestion, days: [...suggestion.days], createdAt: getTodayKey() });
+        state.skippedHabitSuggestions = state.skippedHabitSuggestions.filter((suggestionId) => suggestionId !== id);
+        habitSearchQuery = '';
+        habitCategoryFilter = 'All';
+        saveState();
+        renderApp();
+        showToast(`“${suggestion.name}” is now in your habits.`);
+        break;
+      }
+      case 'skip-habit-suggestion':
+        if (makeHabitSuggestions().some((habit) => habit.id === id) && !state.habits.some((habit) => habit.id === id)) {
+          if (!state.skippedHabitSuggestions.includes(id)) state.skippedHabitSuggestions.push(id);
+          saveState();
+          renderApp();
+        }
+        break;
+      case 'restore-habit-suggestion':
+        state.skippedHabitSuggestions = state.skippedHabitSuggestions.filter((suggestionId) => suggestionId !== id);
+        saveState();
+        renderApp();
+        break;
       case 'edit-habit':
         openHabitModal(id);
         break;
@@ -1459,7 +1551,7 @@
         showToast('Your activity has been cleared. Your habits are still here.');
         break;
       case 'reset-all':
-        if (!window.confirm('Reset Daymark to its starter habits and erase all saved progress on this device?')) return;
+        if (!window.confirm('Start fresh with an empty habit list and erase all saved progress on this device? You can choose suggestions later.')) return;
         if (timerTicker) window.clearInterval(timerTicker);
         timerTicker = null;
         state = makeDefaultState();
@@ -1473,7 +1565,7 @@
         reflectionDraft = '';
         saveState();
         renderApp();
-        showToast('A fresh workspace is ready.');
+        showToast('A fresh, blank routine is ready. Choose only what feels right.');
         break;
       default:
         break;
