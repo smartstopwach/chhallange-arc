@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedInOwner(userId) {
+      return request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function hasValidDaymarkState() {
+      let value = request.resource.data;
+      let state = value.state;
+      return value.keys().hasOnly(['schemaVersion', 'state', 'updatedAtMs', 'updatedAt'])
+        && value.keys().hasAll(['schemaVersion', 'state', 'updatedAtMs', 'updatedAt'])
+        && value.schemaVersion == 1
+        && value.updatedAt is timestamp
+        && value.updatedAt == request.time
+        && state is map
+        && state.keys().hasOnly([
+          'version', 'name', 'habits', 'skippedHabitSuggestions', 'logs',
+          'goals', 'focus', 'reflections', 'sessions', 'timer', 'challenge', 'updatedAt'
+        ])
+        && state.keys().hasAll([
+          'version', 'name', 'habits', 'skippedHabitSuggestions', 'logs',
+          'goals', 'focus', 'reflections', 'sessions', 'timer', 'challenge', 'updatedAt'
+        ])
+        && state.version == 2
+        && state.name is string
+        && state.habits is list
+        && state.skippedHabitSuggestions is list
+        && state.logs is map
+        && state.goals is map
+        && state.focus is map
+        && state.reflections is map
+        && state.sessions is map
+        && state.timer is map
+        && state.challenge is map;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedInOwner(userId);
+      allow create, update: if isSignedInOwner(userId) && hasValidDaymarkState();
+      allow delete: if isSignedInOwner(userId);
+    }
+  }
+}

@@ -2,6 +2,17 @@
   'use strict';
 
   const STORAGE_KEY = 'daymark.app.v1';
+  const GUEST_MIGRATION_KEY = 'daymark.guestMigrated.v1';
+  let activeStorageKey = STORAGE_KEY;
+  let authInitialized = false;
+  let authUser = null;
+  let authMessage = '';
+  let activeSyncUid = '';
+  let cloudSyncUnsubscribe = null;
+  let cloudSaveTimer = null;
+  let cloudSyncStatus = 'connecting';
+  let pendingLegacyImport = false;
+  let applyingRemoteState = false;
   const SIDEBAR_COLLAPSED_KEY = 'daymark.sidebarCollapsed.v1';
   const DAY_MS = 24 * 60 * 60 * 1000;
   const CATEGORIES = ['Wellness', 'Movement', 'Learning', 'Mindfulness', 'Rest', 'Other'];
@@ -228,6 +239,7 @@
       sessions: {},
       timer: { duration: 25 * 60, remaining: 25 * 60, endsAt: null },
       challenge: { id: firstChallenge.id, startDate: dateKey(new Date()) },
+      updatedAt: 0,
     };
   }
 
@@ -482,51 +494,58 @@
     return { duration, remaining, endsAt, justFinished };
   }
 
-  function loadState() {
+  function normalizeStateData(saved) {
+    const defaults = makeDefaultState();
+    if (!isRecord(saved)) return { state: defaults, recoveredFinishedTimer: false };
+    const logs = normalizeLogs(saved.logs);
+    const suggestions = makeHabitSuggestions();
+    const normalizedHabits = Array.isArray(saved.habits)
+      ? saved.habits.map(normalizeHabit).filter(Boolean)
+      : defaults.habits;
+    const habits = normalizedHabits.filter((habit) => {
+      const suggestion = suggestions.find((item) => item.id === habit.id);
+      if (!suggestion || !isUnmodifiedSuggestion(habit, suggestion)) return true;
+      const hasHistory = Object.values(logs).some((record) => record[habit.id] === true);
+      return hasHistory;
+    });
+    const savedChallenge = isRecord(saved.challenge) ? saved.challenge : {};
+    const savedChallengeDefinition = CHALLENGES.find((item) => item.id === savedChallenge.id);
+    const challenge = savedChallengeDefinition || CHALLENGES[0];
+    const sessions = normalizeSessions(saved.sessions);
+    const timer = normalizeTimer(saved.timer);
+    const recoveredFinishedTimer = timer.justFinished;
+    if (recoveredFinishedTimer) sessions[dateKey(new Date())] = (sessions[dateKey(new Date())] || 0) + 1;
+    delete timer.justFinished;
+    const normalizedState = {
+      version: 2,
+      name: typeof saved.name === 'string' ? saved.name.trim().slice(0, 32) : '',
+      habits,
+      skippedHabitSuggestions: normalizeSkippedHabitSuggestions(saved.skippedHabitSuggestions),
+      logs,
+      goals: normalizeGoals(saved.goals),
+      focus: normalizeFocus(saved.focus),
+      reflections: normalizeReflections(saved.reflections),
+      sessions,
+      timer,
+      challenge: {
+        id: challenge.id,
+        startDate: savedChallengeDefinition && isDateKey(savedChallenge.startDate) ? savedChallenge.startDate : dateKey(new Date()),
+      },
+      updatedAt: Number.isFinite(Number(saved.updatedAt)) ? Number(saved.updatedAt) : 0,
+    };
+    return { state: normalizedState, recoveredFinishedTimer };
+  }
+
+  function loadState(storageKey = activeStorageKey) {
     const defaults = makeDefaultState();
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       if (!raw) return defaults;
-      const saved = JSON.parse(raw);
-      if (!isRecord(saved)) return defaults;
-      const logs = normalizeLogs(saved.logs);
-      const suggestions = makeHabitSuggestions();
-      const normalizedHabits = Array.isArray(saved.habits)
-        ? saved.habits.map(normalizeHabit).filter(Boolean)
-        : defaults.habits;
-      const habits = normalizedHabits.filter((habit) => {
-        const suggestion = suggestions.find((item) => item.id === habit.id);
-        if (!suggestion || !isUnmodifiedSuggestion(habit, suggestion)) return true;
-        const hasHistory = Object.values(logs).some((record) => record[habit.id] === true);
-        return hasHistory;
-      });
-      const savedChallenge = isRecord(saved.challenge) ? saved.challenge : {};
-      const savedChallengeDefinition = CHALLENGES.find((item) => item.id === savedChallenge.id);
-      const challenge = savedChallengeDefinition || CHALLENGES[0];
-      const sessions = normalizeSessions(saved.sessions);
-      const timer = normalizeTimer(saved.timer);
-      const recoveredFinishedTimer = timer.justFinished;
-      if (recoveredFinishedTimer) sessions[dateKey(new Date())] = (sessions[dateKey(new Date())] || 0) + 1;
-      delete timer.justFinished;
-      const normalizedState = {
-        version: 2,
-        name: typeof saved.name === 'string' ? saved.name.trim().slice(0, 32) : '',
-        habits,
-        skippedHabitSuggestions: normalizeSkippedHabitSuggestions(saved.skippedHabitSuggestions),
-        logs,
-        goals: normalizeGoals(saved.goals),
-        focus: normalizeFocus(saved.focus),
-        reflections: normalizeReflections(saved.reflections),
-        sessions,
-        timer,
-        challenge: {
-          id: challenge.id,
-          startDate: savedChallengeDefinition && isDateKey(savedChallenge.startDate) ? savedChallenge.startDate : dateKey(new Date()),
-        },
-      };
+      const { state: normalizedState, recoveredFinishedTimer } = normalizeStateData(JSON.parse(raw));
       if (recoveredFinishedTimer) {
+        normalizedState.updatedAt = Math.max(Date.now(), (Number(normalizedState.updatedAt) || 0) + 1);
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizedState));
+          localStorage.setItem(storageKey, JSON.stringify(normalizedState));
         } catch (_) {
           // Keep the recovered session in memory if browser storage is unavailable.
         }
@@ -538,15 +557,347 @@
     }
   }
 
-  function saveState() {
+  function saveState(options = {}) {
+    const touch = options.touch !== false;
+    const shouldSync = options.sync !== false;
+    if (touch) state.updatedAt = Math.max(Date.now(), (Number(state.updatedAt) || 0) + 1);
+    let savedLocally = false;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      return true;
+      localStorage.setItem(activeStorageKey, JSON.stringify(state));
+      savedLocally = true;
     } catch (error) {
       console.warn('Daymark could not save to this browser.', error);
       showToast('Your browser could not save this update. Check available storage.');
-      return false;
     }
+    if (shouldSync && authUser && !applyingRemoteState) scheduleCloudSave();
+    return savedLocally;
+  }
+
+  function hasMeaningfulState(candidate) {
+    if (!isRecord(candidate)) return false;
+    const timer = isRecord(candidate.timer) ? candidate.timer : {};
+    return Boolean(candidate.name)
+      || (Array.isArray(candidate.habits) && candidate.habits.length > 0)
+      || Object.keys(candidate.logs || {}).length > 0
+      || Object.values(candidate.goals || {}).some((items) => Array.isArray(items) && items.length > 0)
+      || Object.keys(candidate.focus || {}).length > 0
+      || Object.keys(candidate.reflections || {}).length > 0
+      || Object.keys(candidate.sessions || {}).length > 0
+      || Boolean(timer.endsAt)
+      || Number(timer.duration) !== 25 * 60
+      || Number(timer.remaining) !== Number(timer.duration);
+  }
+
+  function mergeStateSnapshots(localState, remoteState) {
+    const local = isRecord(localState) ? localState : makeDefaultState();
+    const remote = isRecord(remoteState) ? remoteState : makeDefaultState();
+    const localIsNewer = Number(local.updatedAt) >= Number(remote.updatedAt);
+    const habits = new Map((local.habits || []).map((habit) => [habit.id, habit]));
+    (remote.habits || []).forEach((habit) => habits.set(habit.id, habit));
+    const logs = {};
+    [local.logs, remote.logs].forEach((collection) => {
+      Object.entries(collection || {}).forEach(([day, record]) => {
+        logs[day] = { ...(logs[day] || {}), ...(isRecord(record) ? record : {}) };
+      });
+    });
+    const goals = {};
+    [local.goals, remote.goals].forEach((collection) => {
+      Object.entries(collection || {}).forEach(([day, items]) => {
+        const merged = new Map((goals[day] || []).map((item) => [item.id, item]));
+        (Array.isArray(items) ? items : []).forEach((item) => merged.set(item.id, item));
+        goals[day] = [...merged.values()];
+      });
+    });
+    const sessions = { ...(local.sessions || {}) };
+    Object.entries(remote.sessions || {}).forEach(([day, count]) => {
+      sessions[day] = Math.max(Number(sessions[day]) || 0, Number(count) || 0);
+    });
+    return {
+      ...remote,
+      name: remote.name || local.name || '',
+      habits: [...habits.values()],
+      skippedHabitSuggestions: [...new Set([...(local.skippedHabitSuggestions || []), ...(remote.skippedHabitSuggestions || [])])],
+      logs,
+      goals,
+      focus: { ...(local.focus || {}), ...(remote.focus || {}) },
+      reflections: { ...(local.reflections || {}), ...(remote.reflections || {}) },
+      sessions,
+      timer: localIsNewer ? local.timer : remote.timer,
+      challenge: localIsNewer ? local.challenge : remote.challenge,
+      updatedAt: Math.max(Number(local.updatedAt) || 0, Number(remote.updatedAt) || 0),
+    };
+  }
+
+  function updateCloudSyncIndicator() {
+    const indicator = document.getElementById('cloud-sync-status');
+    if (!indicator) return;
+    const labels = {
+      connecting: 'Checking account',
+      syncing: 'Syncing…',
+      pending: 'Saving…',
+      synced: 'Synced',
+      offline: 'Offline · saved here',
+      error: 'Sync needs attention',
+    };
+    indicator.textContent = labels[cloudSyncStatus] || 'Syncing…';
+    indicator.dataset.status = cloudSyncStatus;
+    indicator.setAttribute('aria-label', `Cloud sync status: ${indicator.textContent}`);
+    const accountStatus = document.querySelector('.account-sync-state');
+    if (accountStatus) {
+      const accountLabels = { connecting: 'Connecting', syncing: 'Syncing', pending: 'Saving changes', synced: 'Up to date', offline: 'Offline · saved on this device', error: 'Sync needs attention' };
+      accountStatus.dataset.status = cloudSyncStatus;
+      accountStatus.innerHTML = `<i aria-hidden="true"></i>${escapeHtml(accountLabels[cloudSyncStatus] || 'Syncing')}`;
+    }
+  }
+
+  function stopCloudSync() {
+    if (typeof cloudSyncUnsubscribe === 'function') cloudSyncUnsubscribe();
+    cloudSyncUnsubscribe = null;
+    activeSyncUid = '';
+    if (cloudSaveTimer) window.clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+  }
+
+  async function persistCloudSnapshot(uid, snapshot) {
+    if (!window.DaymarkFirebase?.saveUserState || !authUser || authUser.uid !== uid) return;
+    try {
+      const result = await window.DaymarkFirebase.saveUserState(uid, snapshot, Number(snapshot.updatedAt) || 0);
+      if (!authUser || authUser.uid !== uid) return;
+      if (result?.accepted) {
+        cloudSyncStatus = Number(state.updatedAt) === Number(snapshot.updatedAt) ? 'synced' : 'pending';
+        updateCloudSyncIndicator();
+        return;
+      }
+      if (result?.accepted === false) {
+        if (!isRecord(result.remote?.state)) {
+          cloudSyncStatus = 'error';
+          updateCloudSyncIndicator();
+          return;
+        }
+        const remote = normalizeStateData(result.remote.state).state;
+        remote.updatedAt = Number(result.remote.updatedAtMs) || Number(remote.updatedAt) || 0;
+        const merged = mergeStateSnapshots(state, remote);
+        merged.updatedAt = Math.max(Date.now(), remote.updatedAt + 1, Number(state.updatedAt) || 0);
+        state = merged;
+        pendingLegacyImport = false;
+        saveState({ touch: false });
+        renderApp();
+        return;
+      }
+      cloudSyncStatus = 'synced';
+      updateCloudSyncIndicator();
+    } catch (error) {
+      console.warn('Daymark could not sync this update to Firestore.', error);
+      cloudSyncStatus = error?.code === 'permission-denied' ? 'error' : 'offline';
+      updateCloudSyncIndicator();
+    }
+  }
+
+  function scheduleCloudSave() {
+    if (!authUser || !window.DaymarkFirebase?.saveUserState) return;
+    const uid = authUser.uid;
+    if (cloudSaveTimer) window.clearTimeout(cloudSaveTimer);
+    cloudSyncStatus = 'pending';
+    updateCloudSyncIndicator();
+    const snapshot = JSON.parse(JSON.stringify(state));
+    cloudSaveTimer = window.setTimeout(() => {
+      cloudSaveTimer = null;
+      void persistCloudSnapshot(uid, snapshot);
+    }, 500);
+  }
+
+  async function flushCloudSave() {
+    if (!authUser || !cloudSaveTimer) return;
+    window.clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+    const snapshot = JSON.parse(JSON.stringify(state));
+    await persistCloudSnapshot(authUser.uid, snapshot);
+  }
+
+  function applyRemoteState(remoteValue, updatedAtMs) {
+    const normalizedResult = normalizeStateData(remoteValue);
+    const normalized = normalizedResult.state;
+    normalized.updatedAt = Number(updatedAtMs) || Number(normalized.updatedAt) || 0;
+    if (normalizedResult.recoveredFinishedTimer) normalized.updatedAt = Math.max(Date.now(), normalized.updatedAt + 1);
+    applyingRemoteState = true;
+    state = normalized;
+    saveState({ touch: false, sync: false });
+    applyingRemoteState = false;
+    if (normalizedResult.recoveredFinishedTimer) scheduleCloudSave();
+    if (timerTicker) window.clearInterval(timerTicker);
+    timerTicker = null;
+    if (state.timer.endsAt) startTimerTicker();
+    renderApp();
+  }
+
+  function handleCloudSnapshot(uid, snapshot) {
+    if (!authUser || authUser.uid !== uid || activeSyncUid !== uid) return;
+    if (snapshot.fromCache) {
+      if (snapshot.exists && !hasMeaningfulState(state)) {
+        applyRemoteState(snapshot.state, snapshot.updatedAtMs);
+      }
+      cloudSyncStatus = navigator.onLine ? 'syncing' : 'offline';
+      updateCloudSyncIndicator();
+      return;
+    }
+    if (snapshot.hasPendingWrites) {
+      cloudSyncStatus = 'syncing';
+      updateCloudSyncIndicator();
+      return;
+    }
+    if (!snapshot.exists) {
+      pendingLegacyImport = false;
+      cloudSyncStatus = 'pending';
+      scheduleCloudSave();
+      return;
+    }
+    if (!isRecord(snapshot.state)) {
+      cloudSyncStatus = 'error';
+      updateCloudSyncIndicator();
+      return;
+    }
+    const remote = normalizeStateData(snapshot.state).state;
+    remote.updatedAt = Number(snapshot.updatedAtMs) || Number(remote.updatedAt) || 0;
+    const localUpdatedAt = Number(state.updatedAt) || 0;
+    const remoteUpdatedAt = Number(snapshot.updatedAtMs) || Number(remote.updatedAt) || 0;
+    if (pendingLegacyImport) {
+      state = mergeStateSnapshots(state, remote);
+      state.updatedAt = Math.max(Date.now(), remoteUpdatedAt + 1);
+      pendingLegacyImport = false;
+      saveState({ touch: false });
+      renderApp();
+      return;
+    }
+    const equalVersionConflict = remoteUpdatedAt === localUpdatedAt
+      && JSON.stringify(remote) !== JSON.stringify(state);
+    if (!hasMeaningfulState(state) || remoteUpdatedAt > localUpdatedAt) {
+      cloudSyncStatus = 'synced';
+      applyRemoteState(snapshot.state, remoteUpdatedAt);
+      updateCloudSyncIndicator();
+      return;
+    }
+    if (equalVersionConflict) {
+      state = mergeStateSnapshots(state, remote);
+      state.updatedAt = Math.max(Date.now(), remoteUpdatedAt + 1);
+      saveState({ touch: false });
+      renderApp();
+      return;
+    }
+    if (localUpdatedAt > remoteUpdatedAt) {
+      scheduleCloudSave();
+      return;
+    }
+    cloudSyncStatus = 'synced';
+    updateCloudSyncIndicator();
+  }
+
+  function startCloudSync(uid) {
+    if (!window.DaymarkFirebase?.subscribeUserState) {
+      cloudSyncStatus = 'error';
+      updateCloudSyncIndicator();
+      return;
+    }
+    stopCloudSync();
+    activeSyncUid = uid;
+    cloudSyncStatus = 'syncing';
+    updateCloudSyncIndicator();
+    try {
+      cloudSyncUnsubscribe = window.DaymarkFirebase.subscribeUserState(
+        uid,
+        (snapshot) => handleCloudSnapshot(uid, snapshot),
+        (error) => {
+          console.warn('Daymark could not read Firestore data.', error);
+          cloudSyncStatus = error?.code === 'permission-denied' ? 'error' : 'offline';
+          updateCloudSyncIndicator();
+        },
+      );
+    } catch (error) {
+      console.warn('Daymark could not start Firestore sync.', error);
+      cloudSyncStatus = 'error';
+      updateCloudSyncIndicator();
+    }
+  }
+
+  function handleFirebaseAuthState(detail = {}) {
+    authInitialized = true;
+    const incomingUser = detail.user || null;
+    authMessage = '';
+    if (!incomingUser?.uid) {
+      if (authUser) {
+        stopCloudSync();
+        authUser = null;
+        activeStorageKey = STORAGE_KEY;
+        pendingLegacyImport = false;
+        state = makeDefaultState();
+        if (timerTicker) window.clearInterval(timerTicker);
+        timerTicker = null;
+      }
+      cloudSyncStatus = 'connecting';
+      renderApp();
+      return;
+    }
+    if (authUser?.uid === incomingUser.uid) {
+      authUser = incomingUser;
+      renderApp();
+      return;
+    }
+    stopCloudSync();
+    authUser = incomingUser;
+    const userStorageKey = `${STORAGE_KEY}.user.${incomingUser.uid}`;
+    let hasUserCache = false;
+    let guestAlreadyMigrated = false;
+    try {
+      hasUserCache = localStorage.getItem(userStorageKey) !== null;
+      guestAlreadyMigrated = localStorage.getItem(GUEST_MIGRATION_KEY) === 'true';
+    } catch (_) {
+      // Continue with the in-memory state if browser storage is unavailable.
+    }
+    const guestCandidate = !hasUserCache && !guestAlreadyMigrated ? loadState(STORAGE_KEY) : null;
+    pendingLegacyImport = Boolean(guestCandidate && hasMeaningfulState(guestCandidate));
+    activeStorageKey = userStorageKey;
+    state = hasUserCache ? loadState(userStorageKey) : pendingLegacyImport ? guestCandidate : makeDefaultState();
+    if (pendingLegacyImport) {
+      try {
+        localStorage.setItem(GUEST_MIGRATION_KEY, 'true');
+      } catch (_) {
+        // A later sign-in may retry importing the legacy local data.
+      }
+    }
+    saveState({ touch: false, sync: false });
+    if (timerTicker) window.clearInterval(timerTicker);
+    timerTicker = null;
+    if (state.timer.endsAt) startTimerTicker();
+    currentView = 'today';
+    cloudSyncStatus = 'syncing';
+    renderApp();
+    startCloudSync(incomingUser.uid);
+  }
+
+  function handleFirebaseAuthError(detail = {}) {
+    authMessage = String(detail.message || 'Google sign-in could not be completed. Please try again.');
+    if (authUser) showToast(authMessage);
+    else renderApp();
+  }
+
+  function beginGoogleSignIn() {
+    authMessage = '';
+    renderApp();
+    if (!window.DaymarkFirebase?.signInWithGoogle) {
+      authMessage = 'Secure sign-in is still loading. Check your connection and try again.';
+      renderApp();
+      return;
+    }
+    window.DaymarkFirebase.signInWithGoogle().catch((error) => {
+      handleFirebaseAuthError({ message: error?.daymarkMessage || 'Google sign-in could not be completed. Please try again.' });
+    });
+  }
+
+  function beginSignOut() {
+    void flushCloudSave().finally(() => {
+      window.DaymarkFirebase?.signOut?.().catch((error) => {
+        showToast(error?.message || 'Could not sign out. Please try again.');
+      });
+    });
   }
 
   function getTodayKey() { return dateKey(new Date()); }
@@ -734,6 +1085,18 @@
     }
   }
 
+  function renderAuthLoadingView() {
+    return `<main class="auth-gate auth-gate-loading"><section class="auth-panel auth-loading-panel" aria-live="polite"><span class="brand-mark auth-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><p class="auth-eyebrow">DAYMARK · YOUR PRIVATE WORKSPACE</p><span class="auth-spinner" aria-hidden="true"></span><h1>Restoring your<br/><span>workspace.</span></h1><p>Checking your secure sign-in. Your habits and plans are waiting.</p></section></main>`;
+  }
+
+  function renderLoginView() {
+    const firebaseReady = Boolean(window.DaymarkFirebase?.signInWithGoogle);
+    const message = authMessage || (firebaseReady
+      ? 'Your habits and progress sync securely to your Google account.'
+      : 'Secure sign-in could not load. Check your connection and reload the page.');
+    return `<main class="auth-gate"><div class="auth-glow auth-glow-one" aria-hidden="true"></div><div class="auth-glow auth-glow-two" aria-hidden="true"></div><section class="auth-panel" aria-labelledby="auth-title"><a class="auth-brand" href="#" aria-label="Daymark"><span class="brand-mark auth-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><span>daymark<span>.</span></span></a><p class="auth-eyebrow">A CALMER WAY TO SHOW UP</p><h1 id="auth-title">Make room for<br/><span>what matters.</span></h1><p class="auth-description">Your routines, reflections, and focus sessions—together in one quiet space, ready wherever you sign in.</p><button class="button button-primary auth-google-button" type="button" data-action="google-sign-in"${firebaseReady ? '' : ' disabled'}><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11c-.5 2.5-1.9 4.6-4 6v5.1h6.5c3.8-3.5 6.1-8.6 6.1-14.8Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.8L31 34.1c-1.8 1.2-4.1 2-7 2-5.3 0-9.8-3.6-11.4-8.4H5.9V33C9.3 39.6 16.1 44 24 44Z"/><path fill="#FBBC05" d="M12.6 27.7a12 12 0 0 1 0-7.4V15H5.9a20 20 0 0 0 0 17.9l6.7-5.2Z"/><path fill="#EA4335" d="M24 11.9c3 0 5.7 1 7.8 3.1l5.9-5.9C34.1 5.8 29.5 4 24 4 16.1 4 9.3 8.4 5.9 15l6.7 5.2c1.6-4.8 6.1-8.3 11.4-8.3Z"/></svg><span>Continue with Google</span></button><p class="auth-feedback${authMessage ? ' is-error' : ''}" role="status" aria-live="polite">${escapeHtml(message)}</p><div class="auth-security-note"><span class="auth-lock-icon">${icon('lock', 15)}</span><span>Private by design. Only you can access your Daymark data.</span></div><div class="auth-divider"><span></span><small>YOUR DAY, YOUR PACE</small><span></span></div><p class="auth-footnote">Sign-in is required to keep your workspace in sync across devices. We never post on your behalf.</p></section><footer class="auth-footer">A little progress, every day. <span>© Daymark</span></footer></main>`;
+  }
+
   function renderNav() {
     document.querySelectorAll('.main-nav [data-view], .settings-link').forEach((button) => {
       const active = button.dataset.view === currentView;
@@ -747,9 +1110,10 @@
     if (topDate) topDate.textContent = compactDate(new Date());
     const profileName = document.getElementById('profile-name');
     const profileAvatar = document.getElementById('profile-avatar');
-    const visibleName = state.name || 'Your space';
+    const visibleName = state.name || authUser?.displayName || authUser?.email || 'Your space';
     if (profileName) profileName.textContent = visibleName;
-    if (profileAvatar) profileAvatar.textContent = state.name ? state.name.trim().charAt(0).toUpperCase() : 'D';
+    if (profileAvatar) profileAvatar.textContent = visibleName.trim().charAt(0).toUpperCase() || 'D';
+    updateCloudSyncIndicator();
     const challenge = getCurrentChallenge();
     const sideName = document.getElementById('sidebar-challenge-name');
     const sideDay = document.getElementById('sidebar-challenge-day');
@@ -765,7 +1129,16 @@
     const host = document.getElementById('app-content');
     if (!host) return;
     const renderedDay = getTodayKey();
+    const authGated = !authInitialized || !authUser;
+    document.body.classList.toggle('auth-gated', authGated);
     applySidebarPreference();
+    if (authGated) {
+      host.innerHTML = authInitialized ? renderLoginView() : renderAuthLoadingView();
+      lastRenderedDay = renderedDay;
+      renderNav();
+      document.title = authInitialized ? 'Sign in · Daymark' : 'Daymark';
+      return;
+    }
     const pages = {
       today: renderTodayView,
       habits: renderHabitsView,
@@ -1096,7 +1469,7 @@
     const note = reflectionDraftDay === key ? reflectionDraft : reflection.note;
     const moodOptions = MOODS.map((item) => `<button class="mood-choice${mood === item.id ? ' is-selected' : ''}" type="button" data-action="select-mood" data-id="${item.id}" data-day="${key}" aria-pressed="${mood === item.id}"><span>${icon(item.icon, 17)}</span><small>${item.label}</small></button>`).join('');
     const status = mood ? `${getMoodLabel(mood)} noted. Add a thought if you like.` : 'Optional · a quick check-in can help you notice patterns.';
-    return `<section class="card mood-card" aria-labelledby="mood-card-title"><div class="mood-layout"><div class="mood-intro"><p class="card-overline">A MOMENT FOR YOU</p><h2 id="mood-card-title">How are you,<br/><span>really?</span></h2><p>No score, no streak. Just a small space to notice how today feels.</p><span class="mood-privacy-note">${icon('lock', 12)} Only saved on this device</span></div><div class="mood-content"><div class="mood-choices" role="group" aria-label="Choose your mood">${moodOptions}</div><form data-form="reflection" data-day="${key}" class="reflection-form"><label class="form-label" for="reflection-note">A note to yourself <span>optional</span></label><textarea id="reflection-note" class="form-control reflection-input" name="note" maxlength="280" placeholder="What is on your mind today?">${escapeHtml(note || '')}</textarea><div class="reflection-footer"><span id="mood-selection-status" aria-live="polite">${escapeHtml(status)}</span><button class="button button-secondary button-small" type="submit">Save check-in ${icon('check', 13)}</button></div></form></div></div></section>`;
+    return `<section class="card mood-card" aria-labelledby="mood-card-title"><div class="mood-layout"><div class="mood-intro"><p class="card-overline">A MOMENT FOR YOU</p><h2 id="mood-card-title">How are you,<br/><span>really?</span></h2><p>No score, no streak. Just a small space to notice how today feels.</p><span class="mood-privacy-note">${icon('lock', 12)} Private to your account</span></div><div class="mood-content"><div class="mood-choices" role="group" aria-label="Choose your mood">${moodOptions}</div><form data-form="reflection" data-day="${key}" class="reflection-form"><label class="form-label" for="reflection-note">A note to yourself <span>optional</span></label><textarea id="reflection-note" class="form-control reflection-input" name="note" maxlength="280" placeholder="What is on your mind today?">${escapeHtml(note || '')}</textarea><div class="reflection-footer"><span id="mood-selection-status" aria-live="polite">${escapeHtml(status)}</span><button class="button button-secondary button-small" type="submit">Save check-in ${icon('check', 13)}</button></div></form></div></div></section>`;
   }
 
   function renderGoalRow(goal, dayKey, options = {}) {
@@ -1262,7 +1635,7 @@
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">YOUR DAILY RHYTHM</p><h1>Habits that fit<br/><span>your real life.</span></h1><p>Make your routine personal. Small, repeatable actions are the ones that tend to stick.</p></div><div class="page-intro-action"><button class="button button-primary" type="button" data-action="add-habit">${icon('plus', 16)} New habit</button></div></header>
       <section class="stats-grid" aria-label="Habit summary">${renderStatCard('Your habits', String(total), 'active', total ? 'A routine built around you' : 'Nothing added automatically', 'list', 'lime')}${renderStatCard('Due today', String(dueToday), 'habits', `${done} checked · ${dueToday ? 'Daily rhythm' : total ? 'Planned rest day' : 'Choose what fits'}`, 'check-circle', 'blue')}${renderStatCard('Current streak', String(getCurrentStreak()), 'days', getCurrentStreak() ? 'Keep your gentle momentum' : 'A new streak starts today', 'flame', 'amber')}${renderStatCard('Challenge day', String(getChallengeDay()), `of ${getCurrentChallenge().duration}`, getCurrentChallenge().name, 'flag', 'violet')}</section>
       <div class="management-layout">
-        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>${total ? 'Set a weekly rhythm. Rest days are built in.' : 'Only habits you choose appear here.'}</p></div></div><span class="category-pill">${total} total</span></div>${habitToolbar}<div class="habit-library-count" id="habit-library-count" aria-live="polite">${resultCount}</div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${completionLabel}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div><div id="habit-library-results">${content}</div><div class="card-note">${icon('lock', 13)}<span>Your habit check-ins stay in this browser, on this device.</span></div></section>
+        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>${total ? 'Set a weekly rhythm. Rest days are built in.' : 'Only habits you choose appear here.'}</p></div></div><span class="category-pill">${total} total</span></div>${habitToolbar}<div class="habit-library-count" id="habit-library-count" aria-live="polite">${resultCount}</div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${completionLabel}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div><div id="habit-library-results">${content}</div><div class="card-note">${icon('lock', 13)}<span>Your check-ins are saved privately to your account and cached on this device.</span></div></section>
         <aside class="card tips-card"><span class="card-heading-icon">${icon('lightbulb', 18)}</span><h2>Make it easy to begin.</h2><p>You do not need a perfect plan. Make the next step small enough to repeat.</p><ol class="tip-list"><li class="tip-item"><span class="tip-number">01</span><span><strong>Start smaller than you think.</strong><small>Two minutes is enough to build the rhythm.</small></span></li><li class="tip-item"><span class="tip-number">02</span><span><strong>Give it a place in your day.</strong><small>Pair a new habit with something you already do.</small></span></li><li class="tip-item"><span class="tip-number">03</span><span><strong>Begin again, without guilt.</strong><small>A missed day is a pause, not a reset.</small></span></li></ol></aside>
       </div>
       ${renderHabitSuggestions()}
@@ -1378,13 +1751,24 @@
     </div>`;
   }
 
+  function renderAccountSettingsCard() {
+    const displayName = authUser?.displayName || state.name || 'Google account';
+    const email = authUser?.email || '';
+    const avatar = authUser?.photoURL
+      ? `<img src="${escapeHtml(authUser.photoURL)}" referrerpolicy="no-referrer" alt=""/>`
+      : escapeHtml(displayName.trim().charAt(0).toUpperCase() || 'D');
+    const syncLabel = ({ connecting: 'Connecting', syncing: 'Syncing', pending: 'Saving changes', synced: 'Up to date', offline: 'Offline · saved on this device', error: 'Sync needs attention' })[cloudSyncStatus] || 'Syncing';
+    return `<section class="card account-settings-card"><div class="account-settings-main"><span class="account-settings-avatar">${avatar}</span><div class="account-settings-copy"><span class="account-settings-label">SIGNED IN WITH GOOGLE</span><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(email)}</small></div></div><div class="account-settings-footer"><span class="account-sync-state" data-status="${escapeHtml(cloudSyncStatus)}"><i aria-hidden="true"></i>${escapeHtml(syncLabel)}</span><button class="button button-quiet button-small" type="button" data-action="sign-out">Sign out</button></div></section>`;
+  }
+
   function renderSettingsView() {
     return `<div class="settings-view">
-      <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">MAKE THIS SPACE YOURS</p><h1>A little more<br/><span>personal.</span></h1><p>Manage your profile and your saved progress. Your tracker works without an account.</p></div></header>
+      <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">MAKE THIS SPACE YOURS</p><h1>A little more<br/><span>personal.</span></h1><p>Manage your profile, signed-in device, and synchronized progress.</p></div></header>
       <div class="settings-layout"><div class="settings-stack">
-        <section class="card settings-card"><h2>Your profile</h2><p>Choose the name you would like to see around Daymark. This stays on this device.</p><form class="settings-form" data-form="profile"><div><label class="form-label" for="profile-name-input">Display name</label><input class="form-control" id="profile-name-input" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="What should we call you?" value="${escapeHtml(state.name)}"/><p class="form-help">Leave this empty if you prefer a quiet, nameless workspace.</p></div><button class="button button-primary button-small" type="submit">Save profile ${icon('check', 14)}</button></form></section>
-        <section class="card settings-card"><h2>Your data</h2><p>Your habits, schedules, moods, focus sessions, and plans are saved locally in this browser. Export a copy any time.</p><div class="data-action-list"><div class="data-action-row"><div class="data-action-copy"><strong>Export your data</strong><small>Download a JSON backup of your habits and progress.</small></div><button class="button button-secondary button-small" type="button" data-action="export">${icon('download', 14)} Export</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Clear activity</strong><small>Remove check-ins, mood notes, focus sessions, and tomorrow's goals. Keep your habits.</small></div><button class="button button-quiet button-small" type="button" data-action="clear-activity">Clear activity</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Start fresh</strong><small>Clear saved progress and start with no active habits. Add only what you choose.</small></div><button class="button button-danger button-small" type="button" data-action="reset-all">Reset app</button></div></div></section>
-      </div><aside class="card settings-side-card"><span class="privacy-icon">${icon('lock', 19)}</span><h2>Just for you.</h2><p>Daymark has no login, no server, and no tracking. Your information stays in your browser unless you choose to export it.</p><span class="local-storage-badge">${icon('check-circle', 12)} Saved on this device</span><div class="card-note" style="margin-top:20px">${icon('sparkles', 13)}<span>Your progress is private, personal, and always yours to keep.</span></div></aside></div>
+        ${renderAccountSettingsCard()}
+        <section class="card settings-card"><h2>Your profile</h2><p>Choose the name you would like to see around Daymark. It is saved with your synced workspace.</p><form class="settings-form" data-form="profile"><div><label class="form-label" for="profile-name-input">Display name</label><input class="form-control" id="profile-name-input" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="What should we call you?" value="${escapeHtml(state.name)}"/><p class="form-help">Leave this empty if you prefer a quiet, nameless workspace.</p></div><button class="button button-primary button-small" type="submit">Save profile ${icon('check', 14)}</button></form></section>
+        <section class="card settings-card"><h2>Your data</h2><p>Your habits, schedules, moods, focus sessions, and plans save instantly on this device, then sync to your private Firestore account when online. Export a copy any time.</p><div class="data-action-list"><div class="data-action-row"><div class="data-action-copy"><strong>Export your data</strong><small>Download a JSON backup of your habits and progress.</small></div><button class="button button-secondary button-small" type="button" data-action="export">${icon('download', 14)} Export</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Clear activity</strong><small>Remove check-ins, mood notes, focus sessions, and tomorrow's goals. Keep your habits.</small></div><button class="button button-quiet button-small" type="button" data-action="clear-activity">Clear activity</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Start fresh</strong><small>Clear saved progress and start with no active habits. Add only what you choose.</small></div><button class="button button-danger button-small" type="button" data-action="reset-all">Reset app</button></div></div></section>
+      </div><aside class="card settings-side-card"><span class="privacy-icon">${icon('lock', 19)}</span><h2>Your space, kept yours.</h2><p>Sign-in is required. Your Daymark document is scoped to your Google account, protected by Firebase rules, and cached locally for quick access when you are offline.</p><span class="local-storage-badge">${icon('check-circle', 12)} Saved locally · cloud sync</span><div class="card-note" style="margin-top:20px">${icon('sparkles', 13)}<span>Your progress stays private to your signed-in account and syncs across your devices.</span></div></aside></div>
     </div>`;
   }
 
@@ -1571,6 +1955,12 @@
     const action = actionElement.dataset.action;
     const id = actionElement.dataset.id;
     switch (action) {
+      case 'google-sign-in':
+        beginGoogleSignIn();
+        break;
+      case 'sign-out':
+        beginSignOut();
+        break;
       case 'insights-range': {
         const requestedDays = Number(actionElement.dataset.days);
         if (requestedDays !== 30 && requestedDays !== 365) return;
@@ -1711,7 +2101,7 @@
         showToast('Your activity has been cleared. Your habits are still here.');
         break;
       case 'reset-all':
-        if (!window.confirm('Start fresh with an empty habit list and erase all saved progress on this device? You can choose suggestions later.')) return;
+        if (!window.confirm('Start fresh with an empty habit list and erase all saved progress in your Daymark account? You can choose suggestions later.')) return;
         if (timerTicker) window.clearInterval(timerTicker);
         timerTicker = null;
         state = makeDefaultState();
@@ -1931,9 +2321,27 @@
     if (event.key === 'Escape' && document.body.classList.contains('has-modal')) closeModal();
   });
 
+  window.addEventListener('daymark:auth-state', (event) => handleFirebaseAuthState(event.detail || {}));
+  window.addEventListener('daymark:auth-error', (event) => handleFirebaseAuthError(event.detail || {}));
+  window.addEventListener('daymark:firebase-ready', () => {
+    if (authInitialized && !authUser) renderApp();
+  });
+  window.addEventListener('online', () => {
+    if (!authUser) return;
+    cloudSyncStatus = 'syncing';
+    updateCloudSyncIndicator();
+  });
+  window.addEventListener('offline', () => {
+    if (!authUser) return;
+    cloudSyncStatus = 'offline';
+    updateCloudSyncIndicator();
+  });
+  window.addEventListener('pagehide', () => { void flushCloudSave(); });
+
   // Use the local calendar date for all summaries and keep the shell's icons accessible.
   hydrateStaticIcons();
-  renderApp();
+  if (window.DaymarkFirebaseState?.initialized) handleFirebaseAuthState(window.DaymarkFirebaseState);
+  else renderApp();
   scheduleDayChangeCheck();
   if (state.timer.endsAt) startTimerTicker();
 })();

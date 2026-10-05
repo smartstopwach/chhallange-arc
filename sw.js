@@ -1,11 +1,17 @@
-const CACHE_NAME = 'daymark-pwa-v1';
+const CACHE_NAME = 'daymark-pwa-v2';
 const APP_ROOT = self.registration.scope;
 const APP_INDEX = new URL('index.html', APP_ROOT).href;
+const FIREBASE_SDK_ASSETS = [
+  'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js',
+  'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js',
+  'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js',
+];
 const APP_SHELL = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './firebase-client.js',
   './pwa.js',
   './site.webmanifest',
   './daymark-icon.svg',
@@ -19,6 +25,11 @@ self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
     await cache.addAll(APP_SHELL);
+    await Promise.allSettled(FIREBASE_SDK_ASSETS.map(async (url) => {
+      const request = new Request(url, { mode: 'cors', credentials: 'omit' });
+      const response = await fetch(request);
+      if (response.ok && response.type === 'cors') await cache.put(request, response);
+    }));
     await self.skipWaiting();
   })());
 });
@@ -35,7 +46,7 @@ self.addEventListener('activate', (event) => {
 
 async function fetchAndCache(request, cache) {
   const response = await fetch(request);
-  if (response.ok && response.type === 'basic') {
+  if (response.ok && ['basic', 'cors'].includes(response.type)) {
     await cache.put(request, response.clone());
   }
   return response;
@@ -74,7 +85,13 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const requestUrl = new URL(request.url);
-  if (requestUrl.origin !== self.location.origin) return;
+  if (requestUrl.origin !== self.location.origin) {
+    const firebaseSdkRequest = requestUrl.origin === 'https://www.gstatic.com'
+      && requestUrl.pathname.startsWith('/firebasejs/12.19.0/')
+      && requestUrl.pathname.endsWith('.js');
+    if (firebaseSdkRequest) event.respondWith(handleAsset(request));
+    return;
+  }
 
   if (request.mode === 'navigate') {
     event.respondWith(handleNavigation(request));
