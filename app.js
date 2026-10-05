@@ -139,6 +139,7 @@
   let selectedMood = '';
   let habitSearchQuery = '';
   let habitCategoryFilter = 'All';
+  let insightsRangeDays = 30;
   let reflectionDraftDay = '';
   let reflectionDraft = '';
   let toastTimer = null;
@@ -447,11 +448,21 @@
   function isCheckedOn(dayKey, habitId) { return Boolean(state.logs[dayKey] && state.logs[dayKey][habitId]); }
   function hasCheckin(dayKey) {
     const record = state.logs[dayKey];
-    return Boolean(record && Object.values(record).some(Boolean));
+    if (!record || !Object.values(record).some(Boolean)) return false;
+    return Object.entries(record).some(([habitId, checked]) => {
+      if (!checked) return false;
+      const habit = state.habits.find((item) => item.id === habitId);
+      if (!habit) return true; // Keep completed history for habits that were later removed.
+      return !isDateKey(habit.createdAt) || dayKey >= habit.createdAt;
+    });
   }
   function scheduledHabitsOn(dayKey) {
     const weekday = dateFromKey(dayKey).getDay();
-    return state.habits.filter((habit) => !Array.isArray(habit.days) || habit.days.includes(weekday));
+    return state.habits.filter((habit) => {
+      const habitHasStarted = !isDateKey(habit.createdAt) || dayKey >= habit.createdAt;
+      const isScheduled = !Array.isArray(habit.days) || habit.days.includes(weekday);
+      return habitHasStarted && isScheduled;
+    });
   }
   function completedHabitsOn(dayKey) { return scheduledHabitsOn(dayKey).filter((habit) => isCheckedOn(dayKey, habit.id)).length; }
   function completionPercent(dayKey) {
@@ -827,7 +838,18 @@
       return `${curve} L ${last.x.toFixed(2)} ${bottom} L ${first.x.toFixed(2)} ${bottom} Z`;
     });
     const gridLines = [top, (top + bottom) / 2, bottom].map((y, index) => `<line class="activity-grid-line${index === 2 ? ' is-base' : ''}" x1="0" y1="${y}" x2="${width}" y2="${y}"/>`).join('');
-    const pointMarkup = points.map(({ item, value, x, y, restDay }) => {
+    const markerIndexes = new Set();
+    if (series.length > 90) {
+      for (let start = 0; start < points.length; start += 7) {
+        const week = points.slice(start, start + 7);
+        const dueDay = week.findIndex((point) => !point.restDay);
+        markerIndexes.add(start + (dueDay >= 0 ? dueDay : 0));
+      }
+      const todayIndex = points.findIndex((point) => point.item.key === getTodayKey());
+      if (todayIndex >= 0) markerIndexes.add(todayIndex);
+    }
+    const visiblePoints = series.length > 90 ? points.filter((_, index) => markerIndexes.has(index)) : points;
+    const pointMarkup = visiblePoints.map(({ item, value, x, y, restDay }) => {
       const today = item.key === getTodayKey();
       const label = `${formatDate(item.date, { weekday: 'long', month: 'short', day: 'numeric' })}: ${restDay ? 'rest day' : `${value}% complete`}`;
       const pointClass = `activity-point${today ? ' is-today' : ''}${restDay ? ' is-rest' : ''}`;
@@ -1056,25 +1078,27 @@
     </div>`;
   }
 
-  function renderMonthChart() {
-    const series = getLastDays(30);
-    const description = series.map((item) => `${formatDate(item.date, { month: 'short', day: 'numeric' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
-    return { series, plot: renderActivityPlot(series, 'month-activity'), description };
+  function renderInsightsChart(series = getLastDays(insightsRangeDays)) {
+    const description = series.length > 90 ? '' : series.map((item) => `${formatDate(item.date, { weekday: 'short', month: 'short', day: 'numeric' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
+    return { series, plot: renderActivityPlot(series, 'insights-activity'), description };
   }
 
-  function renderHeatmap(series) {
-    return `<div class="heatmap" role="img" aria-label="A 30 day habit completion heatmap, with darker squares for less activity">${series.map((item) => {
+  function renderHeatmap(series, isYear = false) {
+    const rangeName = isYear ? 'the past year' : 'the last 30 days';
+    const leadingDays = isYear ? series[0].date.getDay() : 0;
+    const spacerMarkup = '<span class="heat-cell heat-cell-empty" aria-hidden="true"></span>'.repeat(leadingDays);
+    return `<div class="heatmap${isYear ? ' heatmap-year' : ''}" role="img" aria-label="A habit completion heatmap covering ${rangeName}, with brighter squares for more completion">${spacerMarkup}${series.map((item) => {
       const percent = item.percent ?? 0;
       const level = item.scheduled === 0 || percent === 0 ? 0 : percent <= 25 ? 1 : percent <= 50 ? 2 : percent <= 75 ? 3 : 4;
       const label = item.scheduled === 0 ? 'rest day' : `${percent}% complete`;
-      return `<span class="heat-cell" data-level="${level}" title="${escapeHtml(formatDate(item.date, { month: 'short', day: 'numeric' }))}: ${label}"></span>`;
+      return `<span class="heat-cell" data-level="${level}" title="${escapeHtml(formatDate(item.date, { weekday: 'short', month: 'short', day: 'numeric' }))}: ${label}"></span>`;
     }).join('')}</div>`;
   }
 
   function renderConsistencyList(series) {
     if (!state.habits.length) return `<div class="insight-empty">${icon('sparkles', 14)}<span>Add a habit to see how your routines are taking shape.</span></div>`;
     const habits = state.habits.map((habit) => {
-      const dueDays = series.filter((item) => habit.days.includes(item.date.getDay()));
+      const dueDays = series.filter((item) => (!isDateKey(habit.createdAt) || item.key >= habit.createdAt) && habit.days.includes(item.date.getDay()));
       const count = dueDays.filter((item) => isCheckedOn(item.key, habit.id)).length;
       return { habit, count, dueCount: dueDays.length, percent: dueDays.length ? Math.round((count / dueDays.length) * 100) : 0 };
     }).sort((a, b) => b.count - a.count);
@@ -1085,36 +1109,54 @@
     }).join('')}</div>${activeDays ? '' : `<div class="insight-empty">${icon('sparkles', 14)}<span>Your first check-in will start your progress story.</span></div>`}`;
   }
 
-  function renderMoodInsight(series) {
+  function renderMoodInsight(series, rangeName = 'month') {
+    const isYear = rangeName === 'year';
     const counts = MOODS.map((mood) => ({
       ...mood,
       count: series.filter((day) => state.reflections[day.key]?.mood === mood.id).length,
     }));
     const total = counts.reduce((sum, mood) => sum + mood.count, 0);
     const bars = counts.map((mood) => `<div class="mood-insight-row"><span class="mood-insight-icon">${icon(mood.icon, 13)}</span><span class="mood-insight-label">${mood.label}</span><div class="progress-track"><span style="width:${total ? Math.round((mood.count / total) * 100) : 0}%"></span></div><strong>${mood.count}</strong></div>`).join('');
-    return `<section class="card mood-insights-card"><div class="card-heading"><span class="card-heading-icon">${icon('mind', 18)}</span><div class="card-heading-copy"><h2>How the month felt</h2><p>${total} mood check-in${total === 1 ? '' : 's'} · last 30 days</p></div></div>${total ? `<div class="mood-insight-list">${bars}</div><p class="mood-insight-foot">Patterns are information, not a grade.</p>` : `<div class="insight-empty">${icon('sparkles', 14)}<span>Try a quick mood check-in on the home page. This space is just for noticing, never judging.</span></div>`}</section>`;
+    return `<section class="card mood-insights-card"><div class="card-heading"><span class="card-heading-icon">${icon('mind', 18)}</span><div class="card-heading-copy"><h2>${isYear ? 'How the year felt' : 'How the month felt'}</h2><p>${total} mood check-in${total === 1 ? '' : 's'} · ${isYear ? 'past year' : 'last 30 days'}</p></div></div>${total ? `<div class="mood-insight-list">${bars}</div><p class="mood-insight-foot">Patterns are information, not a grade.</p>` : `<div class="insight-empty">${icon('sparkles', 14)}<span>Try a quick mood check-in on the home page. This space is just for noticing, never judging.</span></div>`}</section>`;
   }
 
   function renderInsightsView() {
-    const series = getLastDays(30);
+    const rangeDays = insightsRangeDays === 365 ? 365 : 30;
+    const isYear = rangeDays === 365;
+    const rangeLabel = isYear ? '1 year' : '30 days';
+    const rangeDescription = isYear ? 'the past year' : 'the last 30 days';
+    const series = getLastDays(rangeDays);
     const average = getAverage(series.slice(-7));
-    const monthlyAverage = getAverage(series);
+    const rangeAverage = getAverage(series);
     const checkins = series.filter((item) => item.checkin).length;
-    const focusSessions = getSessionsForDays(30);
-    const chart = renderMonthChart();
-    const hadActivity = checkins > 0;
-    const mostConsistent = state.habits.map((habit) => ({ habit, count: series.filter((item) => isCheckedOn(item.key, habit.id)).length })).sort((a, b) => b.count - a.count)[0];
-    const insightHeading = hadActivity && mostConsistent?.count ? 'Look at you, showing up.' : 'It all starts with one tick.';
-    const insightCopy = hadActivity && mostConsistent?.count
-      ? `You checked in on ${checkins} of the last 30 days. “${escapeHtml(mostConsistent.habit.name)}” is your most consistent habit so far. Keep making it yours.`
+    const focusSessions = getSessionsForDays(rangeDays);
+    const chart = renderInsightsChart(series);
+    const mostConsistent = state.habits
+      .map((habit) => ({
+        habit,
+        count: series.filter((item) => (!isDateKey(habit.createdAt) || item.key >= habit.createdAt)
+          && (!Array.isArray(habit.days) || habit.days.includes(item.date.getDay()))
+          && isCheckedOn(item.key, habit.id)).length,
+      }))
+      .sort((a, b) => b.count - a.count)[0];
+    const insightHeading = checkins && mostConsistent?.count ? 'Look at you, showing up.' : 'It all starts with one tick.';
+    const insightCopy = checkins && mostConsistent?.count
+      ? `You checked in on ${checkins} of ${rangeDays} days. “${escapeHtml(mostConsistent.habit.name)}” is your most consistent habit so far. Keep making it yours.`
       : 'There is no catch-up required and no perfect streak to chase. Check off one small thing today and your progress story begins.';
+    const rangeButtons = `<div class="insights-range-switch" role="group" aria-label="Choose the progress chart range"><button class="range-switch-button${!isYear ? ' is-active' : ''}" type="button" data-action="insights-range" data-days="30" aria-label="Show the last 30 days" aria-pressed="${!isYear}">30D</button><button class="range-switch-button${isYear ? ' is-active' : ''}" type="button" data-action="insights-range" data-days="365" aria-label="Show the last year" aria-pressed="${isYear}">1Y</button></div>`;
+    const labelIndices = isYear ? [0, 61, 122, 182, 243, 304, 364] : [0, 9, 19, 29];
+    const xLabels = labelIndices.map((index, position) => {
+      const date = series[index].date;
+      const options = isYear ? (position === 0 ? { month: 'short', year: '2-digit' } : { month: 'short' }) : { month: 'short', day: 'numeric' };
+      return `<span>${index === series.length - 1 ? 'Today' : escapeHtml(formatDate(date, options))}</span>`;
+    }).join('');
     return `<div class="insights-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">NOTICE THE SMALL WINS</p><h1>Your progress,<br/><span>at a glance.</span></h1><p>Look back with curiosity, not judgment. Every check-in is evidence that you made time for yourself.</p></div></header>
-      <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', `${average}%`, '', 'Average of your daily habits', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), 'of 30', 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Completed with your timer', 'clock', 'violet')}</section>
+      <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', `${average}%`, '', 'Average of your daily habits', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), `of ${rangeDays}`, 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Within this period', 'clock', 'violet')}</section>
       <div class="insights-layout"><div class="insights-main">
-        <section class="card insights-chart-card" aria-labelledby="month-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="month-chart-title">A month of little wins</h2><p>Scheduled habit completion for the last 30 days, through today.</p></div></div><span class="chart-period">${icon('calendar', 12)} 30 days</span></div><div class="chart-summary"><strong>${monthlyAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across the last 30 days. ${escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels" aria-hidden="true"><span>${formatDate(series[0].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[9].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[19].date, { month: 'short', day: 'numeric' })}</span><span>Today</span></div></div></section>
-        <div class="insights-bottom"><section class="card heatmap-card"><div class="card-heading-copy"><h2 class="card-title">Your consistency map</h2><p class="heatmap-intro">Planned days brighten as you check habits off; rest days stay quiet.</p></div>${renderHeatmap(series)}<div class="heatmap-legend"><span>Less</span><i class="heat-cell" data-level="0"></i><i class="heat-cell" data-level="1"></i><i class="heat-cell" data-level="2"></i><i class="heat-cell" data-level="3"></i><i class="heat-cell" data-level="4"></i><span>More</span></div></section><section class="card consistency-card"><div class="card-heading-copy"><h2 class="card-title">Habit consistency</h2><p class="heatmap-intro">Days completed in the last 30.</p></div>${renderConsistencyList(series)}</section></div>
-      </div><aside class="insight-aside"><section class="card insight-note-card"><span class="insight-note-icon">${icon('sparkles', 19)}</span><h2>${insightHeading}</h2><p>${insightCopy}</p><div class="insight-callout">${icon('lightbulb', 14)}<span>Consistency is built in ordinary moments, not perfect ones.</span></div></section>${renderMoodInsight(series)}<section class="card insight-note-card"><span class="insight-note-icon">${icon('target', 19)}</span><h2>Keep it gentle.</h2><p>Try choosing just one habit to focus on this week. Once it feels natural, you can add another.</p><button class="button button-secondary button-small" type="button" data-view="habits" style="margin-top:15px">Review your habits ${icon('arrow', 13)}</button></section></aside></div>
+        <section class="card insights-chart-card" aria-labelledby="range-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="range-chart-title">${isYear ? 'A year' : 'A month'} of little wins</h2><p>Scheduled habit completion for ${rangeDescription}, through today.</p></div></div><div class="insights-range-tools">${rangeButtons}<span class="chart-period">${icon('calendar', 12)} ${rangeLabel}</span></div></div><div class="chart-summary"><strong>${rangeAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across ${rangeLabel}, through today. ${isYear ? `${rangeAverage}% average completion and ${checkins} check-in days.` : escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels${isYear ? ' is-year-range' : ''}" aria-hidden="true">${xLabels}</div></div></section>
+        <div class="insights-bottom${isYear ? ' is-year-range' : ''}"><section class="card heatmap-card"><div class="card-heading-copy"><h2 class="card-title">Your consistency map</h2><p class="heatmap-intro">Planned days brighten as you check habits off; rest days stay quiet.</p></div>${renderHeatmap(series, isYear)}<div class="heatmap-legend"><span>Less</span><i class="heat-cell" data-level="0"></i><i class="heat-cell" data-level="1"></i><i class="heat-cell" data-level="2"></i><i class="heat-cell" data-level="3"></i><i class="heat-cell" data-level="4"></i><span>More</span></div></section><section class="card consistency-card"><div class="card-heading-copy"><h2 class="card-title">Habit consistency</h2><p class="heatmap-intro">Days completed within this period.</p></div>${renderConsistencyList(series)}</section></div>
+      </div><aside class="insight-aside"><section class="card insight-note-card"><span class="insight-note-icon">${icon('sparkles', 19)}</span><h2>${insightHeading}</h2><p>${insightCopy}</p><div class="insight-callout">${icon('lightbulb', 14)}<span>Consistency is built in ordinary moments, not perfect ones.</span></div></section>${renderMoodInsight(series, isYear ? 'year' : 'month')}<section class="card insight-note-card"><span class="insight-note-icon">${icon('target', 19)}</span><h2>Keep it gentle.</h2><p>Try choosing just one habit to focus on this week. Once it feels natural, you can add another.</p><button class="button button-secondary button-small" type="button" data-view="habits" style="margin-top:15px">Review your habits ${icon('arrow', 13)}</button></section></aside></div>
       <p class="page-footnote">Your progress belongs to you. The numbers are here to help, never to judge.</p>
     </div>`;
   }
@@ -1302,6 +1344,13 @@
     const action = actionElement.dataset.action;
     const id = actionElement.dataset.id;
     switch (action) {
+      case 'insights-range': {
+        const requestedDays = Number(actionElement.dataset.days);
+        if (requestedDays !== 30 && requestedDays !== 365) return;
+        insightsRangeDays = requestedDays;
+        renderApp();
+        break;
+      }
       case 'clear-habit-filters':
         habitSearchQuery = '';
         habitCategoryFilter = 'All';

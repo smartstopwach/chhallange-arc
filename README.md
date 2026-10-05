@@ -20,7 +20,7 @@ On supported Chrome/Edge browsers, select **Install** when the button appears or
 
 - Daily habit checklist with categories, time-of-day cues, and custom weekday schedules
 - Searchable, category-filtered habit library with per-habit streaks and a seven-day check-in trail
-- Overall streaks, smooth 7- and 30-day activity line charts, and a 30-day consistency map
+- Overall streaks, a smooth 7-day activity line chart, and selectable 30-day or 1-year Insights with daily line charts, range-aware summaries, and a matching consistency map
 - Flexible 7-, 14-, 30-, and 60-day challenges
 - Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
 - Daily mood check-in and private reflection notes

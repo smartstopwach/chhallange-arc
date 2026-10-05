@@ -917,14 +917,23 @@ svg { display: block; }
 .insights-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(265px, .7fr); align-items: start; gap: 15px; }
 .insights-main { display: grid; gap: 15px; }
 .insights-chart-card { padding: 19px 20px 18px; }
+.insights-range-tools { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.insights-range-switch { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid #333b34; border-radius: 9px; background: #171c18; }
+.range-switch-button { display: inline-grid; min-width: 35px; min-height: 29px; place-items: center; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #859186; font: inherit; font-size: 9px; font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease; }
+.range-switch-button:hover { color: #e0e9d7; }
+.range-switch-button.is-active { border-color: #4c5c3e; background: linear-gradient(180deg, #34402e, #293326); color: #d6f39e; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 2px 8px rgb(0 0 0 / 18%); }
+.range-switch-button:focus-visible { outline: 2px solid #c5ee78; outline-offset: 2px; }
 .month-activity-chart { margin-top: 17px; }
 .month-x-labels { display: flex; grid-column: 2; grid-row: 2; align-items: center; justify-content: space-between; margin: 0; color: #718076; font-size: 8px; }
 .month-x-labels span:last-child { color: #b9d794; font-weight: 700; }
 .insights-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 15px; }
+.insights-bottom.is-year-range { grid-template-columns: minmax(0, 1fr); }
 .heatmap-card, .consistency-card { padding: 18px 19px; }
 .heatmap-intro { margin: 6px 0 14px; color: #7f8a80; font-size: 9px; line-height: 1.5; }
 .heatmap { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px; }
+.heatmap-year { grid-template-columns: repeat(53, minmax(0, 1fr)); grid-template-rows: repeat(7, minmax(0, 1fr)); grid-auto-flow: column; gap: 3px; }
 .heat-cell { position: relative; aspect-ratio: 1; min-width: 0; border: 1px solid #333b34; border-radius: 4px; background: #252b26; }
+.heat-cell-empty { visibility: hidden; border-color: transparent; background: transparent; }
 .heat-cell[data-level="1"] { border-color: #526342; background: #39472d; }
 .heat-cell[data-level="2"] { border-color: #718c4b; background: #5e7939; }
 .heat-cell[data-level="3"] { border-color: #a4ca69; background: #91b958; }
@@ -1235,6 +1244,10 @@ body.has-modal { overflow: hidden; }
   .challenge-library-grid { grid-template-columns: 1fr; }
   .challenge-option { min-height: 183px; }
   .challenge-how { grid-template-columns: 1fr; }
+  .insights-chart-card .card-header { align-items: stretch; flex-direction: column; gap: 11px; }
+  .insights-range-tools { justify-content: space-between; }
+  .range-switch-button { min-width: 42px; min-height: 40px; }
+  .heatmap-year { gap: 2px; }
   .insights-bottom { grid-template-columns: 1fr; }
   .insight-aside { grid-template-columns: 1fr; }
   .month-x-labels { gap: 4px; font-size: 7px; }
