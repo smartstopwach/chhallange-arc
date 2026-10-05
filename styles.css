@@ -270,6 +270,7 @@ svg { display: block; }
 .topbar-actions { display: flex; align-items: center; gap: 17px; }
 .top-date { color: #959e96; font-size: 11px; font-weight: 500; letter-spacing: .15px; }
 .topbar-divider { width: 1px; height: 24px; background: #2b312c; }
+.install-app-button[hidden] { display: none; }
 
 .page-container { width: min(1420px, 100%); min-height: calc(100vh - 68px); margin: 0 auto; padding: 31px clamp(24px, 4vw, 56px) 64px; }
 .page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
@@ -1166,6 +1167,8 @@ body.has-modal { overflow: hidden; }
   .settings-link { width: 40px; height: 40px; min-height: 40px; }
   .topbar { padding-inline: 13px; padding-inline: calc(13px + env(safe-area-inset-left, 0px)) calc(13px + env(safe-area-inset-right, 0px)); }
   .button-small { min-height: 40px; padding-inline: 11px; }
+  .topbar .install-app-button { width: 40px; min-width: 40px; padding-inline: 0; }
+  .install-app-button > span:last-child { display: none; }
   .topbar-actions { gap: 8px; }
   .page-container { padding: 19px 12px 35px; padding: 19px calc(12px + env(safe-area-inset-right, 0px)) calc(35px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
   .page-intro { display: block; }

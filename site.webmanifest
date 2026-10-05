@@ -1,11 +1,15 @@
 {
-  "name": "Daymark",
+  "id": "./",
+  "name": "Daymark — Habit Tracker",
   "short_name": "Daymark",
   "description": "A calmer habit tracker for small daily wins.",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#121512",
   "theme_color": "#121512",
+  "categories": ["health", "lifestyle", "productivity"],
   "icons": [
     {
       "src": "app-icon-192.png",

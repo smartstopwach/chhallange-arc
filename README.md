@@ -10,7 +10,11 @@ Open `index.html` directly, or serve the folder over HTTP:
 python3 -m http.server 4173 --bind 0.0.0.0
 ```
 
-Then visit `http://localhost:4173`.
+Then visit `http://localhost:4173`. The PWA install and offline features require localhost or an HTTPS host; opening the file directly only runs the regular web page.
+
+## Install as an app
+
+On supported Chrome/Edge browsers, select **Install** when the button appears or use the browser's install option. On iPhone or iPad, open Daymark in Safari and choose **Share → Add to Home Screen**. Load the site once while online so its app shell is cached for offline use. Your progress remains local to that browser profile.
 
 ## Features
 
@@ -25,6 +29,6 @@ Then visit `http://localhost:4173`.
 - Collapsible desktop sidebar with a saved expand/collapse preference
 - Local browser storage, profile preferences, JSON export, and reset controls
 - Responsive layout and keyboard-accessible controls, tuned for phone and tablet screens
-- Daymark favicon, mobile home-screen icon, and web app manifest
+- Installable PWA with offline app-shell caching, service-worker updates, install prompt, and mobile home-screen icons
 
 No account or backend is required. Progress is stored in this browser under the `daymark.app.v1` local-storage key; the sidebar display preference is saved separately.
