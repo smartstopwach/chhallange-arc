@@ -100,6 +100,7 @@
     'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 9"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 9.5h17"/><path d="M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/>',
+    search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/>',
     flame: '<path d="M12 22c4.2 0 7-2.8 7-6.7 0-2.7-1.5-4.9-4.6-7.1.2 2.2-1 3.3-2.2 3.8.2-3.9-1.5-7-5.4-9.8.3 3.6-.5 5.5-2.3 8.1A8.1 8.1 0 0 0 3 15.1C3 19.1 6.3 22 12 22Z"/><path d="M12 22c2 0 3.4-1.4 3.4-3.2 0-1.2-.6-2.2-1.9-3.3.1 1.3-.5 1.7-1.1 2-.1-1.8-.9-3.1-2.5-4.2.1 1.8-.3 2.6-1 3.6-.5.7-.8 1.3-.8 2 0 1.8 1.5 3.1 3.9 3.1Z"/>',
     sparkles: '<path d="m12 3 1.3 5.2L18.5 10l-5.2 1.3L12 16.5l-1.3-5.2L5.5 10l5.2-1.8L12 3Z"/><path d="m19 14 .8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14ZM5 3l.6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6L5 3Z"/>',
     water: '<path d="M12 22a7 7 0 0 0 7-7c0-4-7-13-7-13S5 11 5 15a7 7 0 0 0 7 7Z"/><path d="M9 16a3 3 0 0 0 3 3"/>',
@@ -136,6 +137,8 @@
   let editingFocus = false;
   let selectedMoodDay = '';
   let selectedMood = '';
+  let habitSearchQuery = '';
+  let habitCategoryFilter = 'All';
   let reflectionDraftDay = '';
   let reflectionDraft = '';
   let toastTimer = null;
@@ -480,6 +483,28 @@
     return streak;
   }
 
+  function getHabitStreak(habit) {
+    const repeatDays = Array.isArray(habit.days) && habit.days.length ? habit.days : [0, 1, 2, 3, 4, 5, 6];
+    let date = new Date();
+    const todayKey = dateKey(date);
+    if (repeatDays.includes(date.getDay()) && !isCheckedOn(todayKey, habit.id)) date = addDays(date, -1);
+    let streak = 0;
+    let scannedDays = 0;
+    while (scannedDays < 3660) {
+      scannedDays += 1;
+      const key = dateKey(date);
+      if (isDateKey(habit.createdAt) && key < habit.createdAt) break;
+      if (!repeatDays.includes(date.getDay())) {
+        date = addDays(date, -1);
+        continue;
+      }
+      if (!isCheckedOn(key, habit.id)) break;
+      streak += 1;
+      date = addDays(date, -1);
+    }
+    return streak;
+  }
+
   function getBestStreak() {
     const dates = Object.keys(state.logs).filter((key) => hasCheckin(key) && scheduledHabitsOn(key).length).sort();
     let best = 0;
@@ -647,6 +672,22 @@
     return icons.includes(habit.icon) ? habit.icon : CATEGORY_ICONS[habit.category] || 'sparkles';
   }
 
+  function renderHabitWeekStrip(habit) {
+    const week = getLastDays(7);
+    const todayKey = getTodayKey();
+    const statuses = week.map((day) => {
+      const existed = !isDateKey(habit.createdAt) || day.key >= habit.createdAt;
+      const due = existed && (!Array.isArray(habit.days) || habit.days.includes(day.date.getDay()));
+      const complete = due && isCheckedOn(day.key, habit.id);
+      const status = !existed ? 'not started' : !due ? 'rest day' : complete ? 'complete' : day.key === todayKey ? 'not checked yet' : 'not checked';
+      const label = `${formatDate(day.date, { weekday: 'long', month: 'short', day: 'numeric' })}: ${status}`;
+      return { due, complete, today: day.key === todayKey, label };
+    });
+    const accessibleLabel = statuses.map((item) => item.label).join('; ');
+    const dots = statuses.map(({ due, complete, today, label }) => `<span class="habit-week-dot${complete ? ' is-done' : due ? today ? ' is-pending' : ' is-open' : ' is-rest'}" title="${escapeHtml(label)}"></span>`).join('');
+    return `<span class="habit-week-strip" role="img" aria-label="Last seven days: ${escapeHtml(accessibleLabel)}" title="Last 7 days">${dots}</span>`;
+  }
+
   function renderHabitRow(habit, options = {}) {
     const todayKey = getTodayKey();
     const scheduledToday = scheduledHabitsOn(todayKey).some((item) => item.id === habit.id);
@@ -656,8 +697,12 @@
     const name = escapeHtml(habit.name);
     const symbol = getHabitIcon(habit);
     const detail = habit.detail ? `<p class="habit-detail">${escapeHtml(habit.detail)}</p>` : '';
+    const streakDays = managed ? getHabitStreak(habit) : 0;
+    const streakLabel = streakDays
+      ? `${streakDays} scheduled habit day${streakDays === 1 ? '' : 's'} in a row`
+      : 'No active streak yet';
     const meta = managed
-      ? `<div class="management-row-meta"><span class="category-pill">${escapeHtml(habit.category)}</span><span class="habit-time">${icon('clock', 10)}${escapeHtml(habit.time)}</span><span class="schedule-pill" title="${escapeHtml(formatSchedule(habit.days))}">${escapeHtml(formatSchedule(habit.days))}</span></div>`
+      ? `<div class="management-row-meta"><span class="category-pill">${escapeHtml(habit.category)}</span><span class="habit-time">${icon('clock', 10)}${escapeHtml(habit.time)}</span><span class="schedule-pill" title="${escapeHtml(formatSchedule(habit.days))}">${escapeHtml(formatSchedule(habit.days))}</span><span class="habit-streak-pill${streakDays ? ' is-active' : ''}" aria-label="${escapeHtml(streakLabel)}" title="${escapeHtml(streakLabel)}">${icon('flame', 11)}<strong>${streakDays}</strong><small>${streakDays === 1 ? 'day' : 'days'}</small></span>${renderHabitWeekStrip(habit)}</div>`
       : '';
     const time = !managed ? `<span class="habit-time">${icon('clock', 10)}${escapeHtml(habit.time)}</span>` : '';
     const unavailable = managed && !scheduledToday;
@@ -917,19 +962,48 @@
     </div>`;
   }
 
+  function getFilteredHabits() {
+    const query = habitSearchQuery.trim().toLocaleLowerCase();
+    return state.habits.filter((habit) => {
+      const matchesCategory = habitCategoryFilter === 'All' || habit.category === habitCategoryFilter;
+      const matchesQuery = !query || [habit.name, habit.detail, habit.category].some((value) => String(value || '').toLocaleLowerCase().includes(query));
+      return matchesCategory && matchesQuery;
+    });
+  }
+
+  function renderHabitLibraryContent(filteredHabits = getFilteredHabits()) {
+    if (!state.habits.length) return `<div class="habit-management-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong class="habit-name">Your list is a blank page.</strong><p class="habit-detail">Add one small habit to begin shaping your routine.</p><button class="button button-primary button-small" type="button" data-action="add-habit">${icon('plus', 14)} Add your first habit</button></div></div>`;
+    if (!filteredHabits.length) return `<div class="habit-filter-empty"><span class="habit-empty-icon">${icon('search', 18)}</span><strong>No habits found</strong><p>Try a different name or category. Your habits are still here.</p><button class="button-link" type="button" data-action="clear-habit-filters">Clear search and filters ${icon('close', 13)}</button></div>`;
+    return `<ul class="habit-list">${filteredHabits.map((habit) => renderHabitRow(habit, { managed: true })).join('')}</ul>`;
+  }
+
+  function updateHabitLibrary() {
+    const results = document.getElementById('habit-library-results');
+    if (!results) return;
+    const filteredHabits = getFilteredHabits();
+    results.innerHTML = renderHabitLibraryContent(filteredHabits);
+    const count = document.getElementById('habit-library-count');
+    if (count) {
+      count.textContent = state.habits.length
+        ? `${filteredHabits.length} of ${state.habits.length} habit${state.habits.length === 1 ? '' : 's'}`
+        : 'Add a habit to start your personal library';
+    }
+  }
+
   function renderHabitsView() {
     const done = completedHabitsOn(getTodayKey());
     const total = state.habits.length;
+    const filteredHabits = getFilteredHabits();
     const dueToday = scheduledHabitsOn(getTodayKey()).length;
     const todayPercent = dueToday ? Math.round((done / dueToday) * 100) : 0;
-    const content = total
-      ? `<ul class="habit-list">${state.habits.map((habit) => renderHabitRow(habit, { managed: true })).join('')}</ul>`
-      : `<div class="habit-management-empty"><div><span class="habit-empty-icon">${icon('checklist', 20)}</span><strong class="habit-name">Your list is a blank page.</strong><p class="habit-detail">Add one small habit to begin shaping your routine.</p><button class="button button-primary button-small" type="button" data-action="add-habit">${icon('plus', 14)} Add your first habit</button></div></div>`;
+    const categoryOptions = ['All', ...CATEGORIES].map((category) => `<option value="${escapeHtml(category)}"${category === habitCategoryFilter ? ' selected' : ''}>${category === 'All' ? 'All categories' : escapeHtml(category)}</option>`).join('');
+    const resultCount = total ? `${filteredHabits.length} of ${total} habit${total === 1 ? '' : 's'}` : 'Add a habit to start your personal library';
+    const content = renderHabitLibraryContent(filteredHabits);
     return `<div class="habits-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">YOUR DAILY RHYTHM</p><h1>Habits that fit<br/><span>your real life.</span></h1><p>Make your routine personal. Small, repeatable actions are the ones that tend to stick.</p></div><div class="page-intro-action"><button class="button button-primary" type="button" data-action="add-habit">${icon('plus', 16)} New habit</button></div></header>
       <section class="stats-grid" aria-label="Habit summary">${renderStatCard('Your habits', String(total), 'active', 'A routine built around you', 'list', 'lime')}${renderStatCard('Due today', String(dueToday), 'habits', `${done} checked · ${dueToday ? 'Daily rhythm' : 'Planned rest day'}`, 'check-circle', 'blue')}${renderStatCard('Current streak', String(getCurrentStreak()), 'days', getCurrentStreak() ? 'Keep your gentle momentum' : 'A new streak starts today', 'flame', 'amber')}${renderStatCard('Challenge day', String(getChallengeDay()), `of ${getCurrentChallenge().duration}`, getCurrentChallenge().name, 'flag', 'violet')}</section>
       <div class="management-layout">
-        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>Set a weekly rhythm. Rest days are built in.</p></div></div><span class="category-pill">${total} total</span></div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${dueToday ? `${todayPercent}%` : 'Rest day'}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div>${content}<div class="card-note">${icon('lock', 13)}<span>Your habit check-ins stay in this browser, on this device.</span></div></section>
+        <section class="card management-card" aria-labelledby="habit-library-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('checklist', 18)}</span><div class="card-heading-copy"><h2 id="habit-library-title">Your habit list</h2><p>Set a weekly rhythm. Rest days are built in.</p></div></div><span class="category-pill">${total} total</span></div><div class="habit-library-toolbar"><label class="habit-search-field"><span>${icon('search', 15)}</span><input class="form-control" id="habit-search" type="search" autocomplete="off" placeholder="Search habits…" aria-label="Search your habits" value="${escapeHtml(habitSearchQuery)}"/></label><label class="sr-only" for="habit-category-filter">Filter by category</label><select class="form-control habit-category-filter" id="habit-category-filter">${categoryOptions}</select></div><div class="habit-library-count" id="habit-library-count" aria-live="polite">${resultCount}</div><div class="habit-progress-block"><div class="progress-meta"><span>Today's completion</span><span><strong>${dueToday ? `${todayPercent}%` : 'Rest day'}</strong></span></div><div class="progress-track"><span style="width:${todayPercent}%"></span></div></div><div id="habit-library-results">${content}</div><div class="card-note">${icon('lock', 13)}<span>Your habit check-ins stay in this browser, on this device.</span></div></section>
         <aside class="card tips-card"><span class="card-heading-icon">${icon('lightbulb', 18)}</span><h2>Make it easy to begin.</h2><p>You do not need a perfect plan. Make the next step small enough to repeat.</p><ol class="tip-list"><li class="tip-item"><span class="tip-number">01</span><span><strong>Start smaller than you think.</strong><small>Two minutes is enough to build the rhythm.</small></span></li><li class="tip-item"><span class="tip-number">02</span><span><strong>Give it a place in your day.</strong><small>Pair a new habit with something you already do.</small></span></li><li class="tip-item"><span class="tip-number">03</span><span><strong>Begin again, without guilt.</strong><small>A missed day is a pause, not a reset.</small></span></li></ol></aside>
       </div>
       <p class="page-footnote">Your habits are yours to shape. Add, edit, or remove them whenever life changes.</p>
@@ -1192,6 +1266,14 @@
     const action = actionElement.dataset.action;
     const id = actionElement.dataset.id;
     switch (action) {
+      case 'clear-habit-filters':
+        habitSearchQuery = '';
+        habitCategoryFilter = 'All';
+        if (document.getElementById('habit-search')) document.getElementById('habit-search').value = '';
+        if (document.getElementById('habit-category-filter')) document.getElementById('habit-category-filter').value = 'All';
+        updateHabitLibrary();
+        window.requestAnimationFrame(() => document.getElementById('habit-search')?.focus());
+        break;
       case 'toggle-sidebar':
         sidebarCollapsed = !sidebarCollapsed;
         applySidebarPreference();
@@ -1337,6 +1419,8 @@
         showToast('Your habit has been updated.');
       } else {
         state.habits.push({ id: randomId(), name, detail, category, time, icon: CATEGORY_ICONS[category], days, createdAt: getTodayKey() });
+        habitSearchQuery = '';
+        habitCategoryFilter = 'All';
         saveState();
         closeModal();
         renderApp();
@@ -1442,10 +1526,23 @@
 
   document.addEventListener('submit', handleSubmit);
   document.addEventListener('input', (event) => {
-    const input = event.target.closest('#reflection-note');
-    if (!input) return;
-    reflectionDraftDay = getTodayKey();
-    reflectionDraft = input.value;
+    const reflectionInput = event.target.closest('#reflection-note');
+    if (reflectionInput) {
+      reflectionDraftDay = getTodayKey();
+      reflectionDraft = reflectionInput.value;
+      return;
+    }
+    const searchInput = event.target.closest('#habit-search');
+    if (searchInput) {
+      habitSearchQuery = searchInput.value;
+      updateHabitLibrary();
+    }
+  });
+  document.addEventListener('change', (event) => {
+    const categoryFilter = event.target.closest('#habit-category-filter');
+    if (!categoryFilter) return;
+    habitCategoryFilter = CATEGORIES.includes(categoryFilter.value) ? categoryFilter.value : 'All';
+    updateHabitLibrary();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && document.body.classList.contains('has-modal')) closeModal();
