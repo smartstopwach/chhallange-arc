@@ -837,7 +837,9 @@ svg { display: block; }
 .habit-search-field .form-control { padding-left: 35px; }
 .habit-category-filter { padding-right: 25px; }
 .habit-library-count { min-height: 13px; margin-top: 9px; color: #7e897f; font-size: 9px; }
-.habit-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+.habit-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.habit-due-time { display: inline-flex; min-height: 27px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #354136; border-radius: 7px; background: #222822; color: #afc194; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.habit-due-time svg { width: 11px; height: 11px; flex: 0 0 auto; color: #c1d995; }
 .habit-row-actions .icon-button { width: 29px; height: 29px; }
 .management-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .schedule-pill { display: inline-flex; align-items: center; padding: 3px 7px; border: 1px solid #343c34; border-radius: 6px; background: #1f251f; color: #849184; font-size: 8px; font-weight: 600; white-space: nowrap; }
