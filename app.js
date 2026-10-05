@@ -142,6 +142,7 @@
   let habitSearchQuery = '';
   let habitCategoryFilter = 'All';
   let insightsRangeDays = 30;
+  let pomodoroRangeDays = 30;
   let reflectionDraftDay = '';
   let reflectionDraft = '';
   let toastTimer = null;
@@ -741,7 +742,7 @@
       else button.removeAttribute('aria-current');
     });
     const breadcrumb = document.getElementById('breadcrumb-current');
-    if (breadcrumb) breadcrumb.textContent = ({ today: 'Today', habits: 'Habits', planner: 'Planner', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today';
+    if (breadcrumb) breadcrumb.textContent = ({ today: 'Today', habits: 'Habits', planner: 'Planner', pomodoro: 'Pomodoro', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today';
     const topDate = document.getElementById('top-date');
     if (topDate) topDate.textContent = compactDate(new Date());
     const profileName = document.getElementById('profile-name');
@@ -769,6 +770,7 @@
       today: renderTodayView,
       habits: renderHabitsView,
       planner: renderPlannerView,
+      pomodoro: renderPomodoroView,
       challenges: renderChallengesView,
       insights: renderInsightsView,
       settings: renderSettingsView,
@@ -776,7 +778,7 @@
     host.innerHTML = (pages[currentView] || renderTodayView)();
     lastRenderedDay = renderedDay;
     renderNav();
-    document.title = `${({ today: 'Today', habits: 'Habits', planner: 'Planner', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today'} · Daymark`;
+    document.title = `${({ today: 'Today', habits: 'Habits', planner: 'Planner', pomodoro: 'Pomodoro', challenges: 'Challenges', insights: 'Insights', settings: 'Settings' })[currentView] || 'Today'} · Daymark`;
   }
 
   function ringMarkup(percent, size, className, centerMarkup) {
@@ -1022,19 +1024,69 @@
     </section>`;
   }
 
-  function renderFocusTimerCard() {
+  function renderFocusTimerCard(featured = false) {
     const remaining = getTimerRemaining();
     const running = isTimerRunning();
     const sessionsToday = state.sessions[getTodayKey()] || 0;
     const progress = Math.round(((state.timer.duration - remaining) / state.timer.duration) * 100);
     const status = running ? 'Stay with one thing. You have got this.' : remaining === 0 ? 'Session complete. Take a breath before the next thing.' : 'A small, focused sprint is enough.';
-    return `<section class="card timer-card" aria-labelledby="focus-timer-title">
-      <div class="card-header"><div class="card-heading"><span class="card-heading-icon timer-heading-icon">${icon('clock', 18)}</span><div class="card-heading-copy"><h2 id="focus-timer-title">Focus timer</h2><p>Give one thing your full attention.</p></div></div><span class="timer-live-label${running ? ' is-running' : ''}">${running ? 'IN SESSION' : 'POMODORO'}</span></div>
+    return `<section class="card timer-card${featured ? ' timer-card-featured' : ''}" aria-labelledby="focus-timer-title">
+      <div class="card-header"><div class="card-heading"><span class="card-heading-icon timer-heading-icon">${icon('clock', 18)}</span><div class="card-heading-copy"><h2 id="focus-timer-title">${featured ? 'Pomodoro timer' : 'Focus timer'}</h2><p>${featured ? 'Choose a sprint and stay with one thing.' : 'Give one thing your full attention.'}</p></div></div><span class="timer-live-label${running ? ' is-running' : ''}">${running ? 'IN SESSION' : 'POMODORO'}</span></div>
       <div class="timer-display-row"><div class="timer-readout"><strong id="focus-timer-time">${formatTimer(remaining)}</strong><span id="focus-timer-status">${status}</span></div><div class="timer-session-count"><strong>${sessionsToday}</strong><span>sessions today</span></div></div>
       <div class="timer-progress-track" role="progressbar" aria-label="Focus session progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span id="focus-timer-progress-fill" style="width:${progress}%"></span></div>
       <div class="timer-presets" role="group" aria-label="Focus session length">${TIMER_PRESETS.map((minutes) => `<button type="button" class="timer-preset${state.timer.duration === minutes * 60 ? ' is-selected' : ''}" data-action="timer-preset" data-minutes="${minutes}" aria-pressed="${state.timer.duration === minutes * 60}"${running ? ' disabled' : ''}>${minutes} min</button>`).join('')}</div>
       <div class="timer-controls"><button id="focus-timer-toggle" class="button button-primary button-small" type="button" data-action="timer-toggle">${icon(running ? 'pause' : 'play', 14)} ${running ? 'Pause session' : remaining === 0 ? 'Start again' : 'Start focus'}</button><button class="button button-secondary button-small" type="button" data-action="timer-reset">Reset</button></div>
+      ${featured ? '' : `<div class="timer-open-link"><span>Your focus rhythm lives in Pomodoro.</span><button class="button-link" type="button" data-view="pomodoro">Open Pomodoro ${icon('arrow', 12)}</button></div>`}
     </section>`;
+  }
+
+  function renderPomodoroChart(series, rangeDays) {
+    const total = series.reduce((sum, day) => sum + day.sessions, 0);
+    const maxSessions = Math.max(0, ...series.map((day) => day.sessions));
+    const axisMaximum = Math.max(4, Math.ceil(maxSessions / 2) * 2);
+    const width = 700;
+    const height = 230;
+    const top = 20;
+    const bottom = 190;
+    const points = series.map((day, index) => ({
+      day,
+      x: ((index + 0.5) / series.length) * width,
+      y: top + ((axisMaximum - day.sessions) / axisMaximum) * (bottom - top),
+    }));
+    const linePath = smoothActivityPath(points);
+    const areaPath = points.length > 1
+      ? `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${bottom} L ${points[0].x.toFixed(2)} ${bottom} Z`
+      : '';
+    const levels = [axisMaximum, axisMaximum / 2, 0];
+    const gridLines = levels.map((level, index) => {
+      const y = top + ((axisMaximum - level) / axisMaximum) * (bottom - top);
+      return `<line class="pomodoro-grid-line${index === levels.length - 1 ? ' is-base' : ''}" x1="0" y1="${y}" x2="${width}" y2="${y}"/>`;
+    }).join('');
+    const yLabels = levels.map((level) => {
+      const y = top + ((axisMaximum - level) / axisMaximum) * (bottom - top);
+      return `<span style="top:${((y / height) * 100).toFixed(2)}%">${level}</span>`;
+    }).join('');
+    const dots = points.map(({ day, x, y }) => {
+      const today = day.key === getTodayKey();
+      const label = `${formatDate(day.date, { weekday: 'long', month: 'short', day: 'numeric' })}: ${day.sessions} completed focus session${day.sessions === 1 ? '' : 's'}`;
+      return `<circle class="pomodoro-graph-point${today ? ' is-today' : ''}${day.sessions ? ' has-sessions' : ''}" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${today ? 5.5 : 4}"><title>${escapeHtml(label)}</title></circle>`;
+    }).join('');
+    const labelIndexes = [...new Set([0, Math.round((series.length - 1) * .25), Math.round((series.length - 1) * .5), Math.round((series.length - 1) * .75), series.length - 1])];
+    const xLabels = labelIndexes.map((index) => `<span>${index === series.length - 1 ? 'Today' : escapeHtml(formatDate(series[index].date, { month: 'short', day: 'numeric' }))}</span>`).join('');
+    const rangeButtons = [7, 30, 90].map((days) => `<button type="button" class="range-switch-button${rangeDays === days ? ' is-active' : ''}" data-action="pomodoro-range" data-days="${days}" aria-pressed="${rangeDays === days}" aria-label="Show Pomodoro sessions for ${days} days">${days}D</button>`).join('');
+    const ariaLabel = `Completed Pomodoro sessions over the last ${rangeDays} days. ${total} total sessions.`;
+    return `<section class="card pomodoro-chart-card" aria-labelledby="pomodoro-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon pomodoro-chart-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="pomodoro-chart-title">Your focus rhythm</h2><p>Completed sessions, day by day</p></div></div><div class="insights-range-switch pomodoro-range-switch" role="group" aria-label="Choose Pomodoro chart range">${rangeButtons}</div></div><div class="pomodoro-chart-summary"><strong>${total}</strong><span>completed sessions</span><span class="pomodoro-chart-legend">Sessions per day</span></div><div class="pomodoro-chart" role="img" aria-label="${ariaLabel}"><div class="pomodoro-chart-y-axis" aria-hidden="true">${yLabels}</div><div class="pomodoro-chart-plot" aria-hidden="true"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" focusable="false"><defs><linearGradient id="pomodoro-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c5a7ed" stop-opacity=".28"/><stop offset="100%" stop-color="#c5a7ed" stop-opacity=".015"/></linearGradient><linearGradient id="pomodoro-line" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8ba9e9"/><stop offset="55%" stop-color="#c5a7ed"/><stop offset="100%" stop-color="#f0c1e8"/></linearGradient></defs>${gridLines}${areaPath ? `<path class="pomodoro-graph-area" d="${areaPath}"/>` : ''}<path class="pomodoro-graph-line" d="${linePath}"/>${dots}</svg></div><div class="pomodoro-chart-x-axis" aria-hidden="true">${xLabels}</div></div><div class="pomodoro-chart-foot">${total ? `<span>${series.filter((day) => day.sessions > 0).length} active focus days in this range</span>` : '<span>Your graph starts when you finish your first session.</span>'}<span>Only completed timers count</span></div></section>`;
+  }
+
+  function renderPomodoroView() {
+    const series = getLastDays(pomodoroRangeDays).map((day) => ({ ...day, sessions: state.sessions[day.key] || 0 }));
+    const total = series.reduce((sum, day) => sum + day.sessions, 0);
+    const activeDays = series.filter((day) => day.sessions > 0).length;
+    const todaySessions = state.sessions[getTodayKey()] || 0;
+    const bestDay = series.reduce((best, day) => day.sessions > (best?.sessions || 0) ? day : best, null);
+    const bestSessions = bestDay?.sessions || 0;
+    const bestDayLabel = bestSessions ? formatDate(bestDay.date, { month: 'short', day: 'numeric' }) : 'No best day yet';
+    return `<div class="pomodoro-view"><header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">ONE SPRINT AT A TIME</p><h1>Make room for<br/><span>deep focus.</span></h1><p>Choose a session length, focus on one thing, and let every completed Pomodoro build your rhythm.</p></div></header><section class="stats-grid pomodoro-stats" aria-label="Pomodoro summary">${renderStatCard('Completed sessions', String(total), 'total', `In the last ${pomodoroRangeDays} days`, 'check-circle', 'violet')}${renderStatCard('Today', String(todaySessions), 'sessions', 'Completed focus blocks', 'clock', 'blue')}${renderStatCard('Active days', String(activeDays), `of ${pomodoroRangeDays}`, 'At least one session', 'calendar', 'lime')}${renderStatCard('Best day', String(bestSessions), 'sessions', bestDayLabel, 'flame', 'amber')}</section><div class="pomodoro-layout"><div class="pomodoro-main-column">${renderFocusTimerCard(true)}${renderPomodoroChart(series, pomodoroRangeDays)}</div><aside class="pomodoro-aside"><section class="card pomodoro-guide-card"><div class="card-heading"><span class="card-heading-icon pomodoro-chart-icon">${icon('sparkles', 18)}</span><div class="card-heading-copy"><h2>A gentle focus flow</h2><p>Make the next sprint feel doable.</p></div></div><ol class="pomodoro-steps"><li><span>01</span><div><strong>Choose a length</strong><small>Pick 15, 25, or 45 minutes.</small></div></li><li><span>02</span><div><strong>Focus on one thing</strong><small>Keep the next step small and clear.</small></div></li><li><span>03</span><div><strong>Finish, then reset</strong><small>Completed sessions add to your graph.</small></div></li></ol><div class="pomodoro-note">${icon('lightbulb', 14)}<span>Pausing is okay. Only a finished timer counts as a completed session.</span></div></section><section class="card pomodoro-quiet-card"><span class="pomodoro-quiet-icon">${icon('moon', 18)}</span><h2>Progress, not pressure.</h2><p>Your chart shows focus sessions, not a score. A short, intentional sprint is a win.</p></section></aside></div><p class="page-footnote">Your focus history stays private in this browser, alongside the rest of your Daymark data.</p></div>`;
   }
 
   function renderMoodCard() {
@@ -1526,6 +1578,13 @@
         renderApp();
         break;
       }
+      case 'pomodoro-range': {
+        const requestedDays = Number(actionElement.dataset.days);
+        if (![7, 30, 90].includes(requestedDays)) return;
+        pomodoroRangeDays = requestedDays;
+        renderApp();
+        break;
+      }
       case 'clear-habit-filters':
         habitSearchQuery = '';
         habitCategoryFilter = 'All';
@@ -1801,7 +1860,7 @@
 
   function handleView(viewElement) {
     const nextView = viewElement.dataset.view;
-    if (!['today', 'habits', 'planner', 'challenges', 'insights', 'settings'].includes(nextView)) return;
+    if (!['today', 'habits', 'planner', 'pomodoro', 'challenges', 'insights', 'settings'].includes(nextView)) return;
     currentView = nextView;
     editingFocus = false;
     renderApp();

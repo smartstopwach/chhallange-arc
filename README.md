@@ -23,7 +23,7 @@ On supported Chrome/Edge browsers, select **Install** when the button appears or
 - Searchable, category-filtered habit library with per-habit streaks and a seven-day check-in trail
 - Overall streaks, a smooth 7-day activity line chart, and selectable 30-day or 1-year Insights with daily line charts, range-aware summaries, and a matching consistency map
 - Flexible 7-, 14-, 30-, and 60-day challenges
-- Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
+- Dedicated Pomodoro tab with 15-, 25-, and 45-minute focus sessions, session summaries, and a 7-, 30-, or 90-day daily-completion line graph
 - Daily mood check-in and private reflection notes
 - Detailed next-day planner with a top priority, all 24 hours, selectable 1–4 hour task blocks, overlap protection, and scheduled habits
 - Date-based task handoff: tomorrow's tasks appear in Today on their calendar date; open views refresh at local midnight and charts include today's check-ins
