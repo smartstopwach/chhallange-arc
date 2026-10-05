@@ -720,26 +720,73 @@
     </section>`;
   }
 
+  function smoothActivityPath(points) {
+    if (!points.length) return '';
+    if (points.length === 1) return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+    let path = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const previous = points[Math.max(0, index - 1)];
+      const start = points[index];
+      const end = points[index + 1];
+      const next = points[Math.min(points.length - 1, index + 2)];
+      const controlOneX = start.x + (end.x - previous.x) / 6;
+      const controlOneY = start.y + (end.y - previous.y) / 6;
+      const controlTwoX = end.x - (next.x - start.x) / 6;
+      const controlTwoY = end.y - (next.y - start.y) / 6;
+      path += ` C ${controlOneX.toFixed(2)} ${controlOneY.toFixed(2)}, ${controlTwoX.toFixed(2)} ${controlTwoY.toFixed(2)}, ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+    }
+    return path;
+  }
+
+  function renderActivityPlot(series, id) {
+    const width = 700;
+    const height = 270;
+    const top = 20;
+    const bottom = 230;
+    const points = series.map((item, index) => {
+      const value = item.percent ?? 0;
+      const x = ((index + .5) / series.length) * width;
+      const y = item.scheduled ? top + ((100 - value) / 100) * (bottom - top) : bottom + 18;
+      return { item, value, x, y, restDay: item.scheduled === 0 };
+    });
+    const segments = [];
+    let activeSegment = [];
+    points.forEach((point) => {
+      if (point.restDay) {
+        if (activeSegment.length) segments.push(activeSegment);
+        activeSegment = [];
+      } else activeSegment.push(point);
+    });
+    if (activeSegment.length) segments.push(activeSegment);
+    const linePaths = segments.filter((segment) => segment.length > 1).map(smoothActivityPath);
+    const areaPaths = segments.filter((segment) => segment.length > 1).map((segment) => {
+      const curve = smoothActivityPath(segment);
+      const first = segment[0];
+      const last = segment[segment.length - 1];
+      return `${curve} L ${last.x.toFixed(2)} ${bottom} L ${first.x.toFixed(2)} ${bottom} Z`;
+    });
+    const gridLines = [top, (top + bottom) / 2, bottom].map((y, index) => `<line class="activity-grid-line${index === 2 ? ' is-base' : ''}" x1="0" y1="${y}" x2="${width}" y2="${y}"/>`).join('');
+    const pointMarkup = points.map(({ item, value, x, y, restDay }) => {
+      const today = item.key === getTodayKey();
+      const label = `${formatDate(item.date, { weekday: 'long', month: 'short', day: 'numeric' })}: ${restDay ? 'rest day' : `${value}% complete`}`;
+      const pointClass = `activity-point${today ? ' is-today' : ''}${restDay ? ' is-rest' : ''}`;
+      return `<span class="${pointClass}" style="left:${((x / width) * 100).toFixed(3)}%;top:${((y / height) * 100).toFixed(3)}%" title="${escapeHtml(label)}"></span>`;
+    }).join('');
+    return `<div class="activity-line-plot"><svg class="activity-line-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><defs><linearGradient id="${id}-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c5ee78" stop-opacity=".24"/><stop offset="100%" stop-color="#c5ee78" stop-opacity=".015"/></linearGradient><linearGradient id="${id}-stroke" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8eaa62"/><stop offset="55%" stop-color="#c5ee78"/><stop offset="100%" stop-color="#e1ffab"/></linearGradient></defs><g>${gridLines}</g>${areaPaths.map((path) => `<path class="activity-area" d="${path}" fill="url(#${id}-area)"/>`).join('')}${linePaths.map((path) => `<path class="activity-line" d="${path}" stroke="url(#${id}-stroke)"/>`).join('')}</svg><div class="activity-point-layer${series.length > 10 ? ' is-compact' : ''}" aria-hidden="true">${pointMarkup}</div></div>`;
+  }
+
   function renderWeeklyCard() {
     const series = getLastDays(7);
     const average = getAverage(series);
     const trackedSeries = series.filter((item) => item.scheduled > 0);
     const bestDay = trackedSeries.reduce((best, item) => item.percent > (best?.percent ?? -1) ? item : best, null);
-    const bars = series.map((item) => {
-      const isToday = item.key === getTodayKey();
-      const restDay = item.scheduled === 0;
-      const value = item.percent ?? 0;
-      const fill = Math.max(value, 1.5);
-      const dayLabel = formatDate(item.date, { weekday: 'long', month: 'short', day: 'numeric' });
-      return `<div class="bar-column${isToday ? ' is-today' : ''}${restDay ? ' is-rest' : ''}" title="${escapeHtml(dayLabel)}: ${restDay ? 'rest day' : `${value}% complete`}" aria-label="${escapeHtml(formatDate(item.date, { weekday: 'long' }))}: ${restDay ? 'rest day' : `${value}% complete`}">
-        <div class="bar-track"><div class="bar-fill" style="height:${fill}%"></div></div><span class="bar-label">${formatDate(item.date, { weekday: 'narrow' })}</span>
-      </div>`;
-    }).join('');
     const hasActivity = series.some((item) => item.checkin);
+    const chartDescription = series.map((item) => `${formatDate(item.date, { weekday: 'long' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
+    const labels = series.map((item) => `<span${item.key === getTodayKey() ? ' class="is-today"' : ''}>${escapeHtml(formatDate(item.date, { weekday: 'short' }).replace('.', ''))}</span>`).join('');
     return `<section class="card chart-card" aria-labelledby="weekly-chart-title">
       <div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="weekly-chart-title">Your week, in rhythm</h2><p>Completion on days you planned a habit.</p></div></div><span class="chart-period">${icon('calendar', 12)} 7 days</span></div>
       <div class="chart-summary"><strong>${average}%</strong><span>average completion</span><span class="chart-legend">Habits done</span></div>
-      <div class="bar-chart"><div class="chart-y-labels" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div><div class="chart-plot" role="img" aria-label="Habit completion for the last seven days, average ${average} percent">${bars}</div></div>
+      <div class="activity-chart" role="img" aria-label="Habit completion over the last seven days, average ${average} percent. ${escapeHtml(chartDescription)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${renderActivityPlot(series, 'week-activity')}<div class="activity-day-labels" aria-hidden="true">${labels}</div></div>
       <div class="chart-foot">${hasActivity && bestDay ? `<span>Best day: <strong>${escapeHtml(formatDate(bestDay.date, { weekday: 'long' }))}</strong></span><button class="button-link" type="button" data-view="insights">More insights ${icon('arrow', 13)}</button>` : `<span class="chart-empty-message">Your first check-in will bring this chart to life.</span><button class="button-link" type="button" data-view="insights">See insights ${icon('arrow', 13)}</button>`}</div>
     </section>`;
   }
@@ -909,13 +956,8 @@
 
   function renderMonthChart() {
     const series = getLastDays(30);
-    const bars = series.map((item) => {
-      const restDay = item.scheduled === 0;
-      const value = item.percent ?? 0;
-      const dateLabel = formatDate(item.date, { weekday: 'long', month: 'short', day: 'numeric' });
-      return `<div class="month-bar-column${item.key === getTodayKey() ? ' is-today' : ''}${restDay ? ' is-rest' : ''}" title="${escapeHtml(dateLabel)}: ${restDay ? 'rest day' : `${value}% complete`}" aria-label="${escapeHtml(formatDate(item.date, { month: 'short', day: 'numeric' }))}: ${restDay ? 'rest day' : `${value}%`}"><div class="month-bar" style="height:${Math.max(value, 1.5)}%"></div></div>`;
-    }).join('');
-    return { series, bars };
+    const description = series.map((item) => `${formatDate(item.date, { month: 'short', day: 'numeric' })}: ${item.scheduled ? `${item.percent}%` : 'rest day'}`).join('; ');
+    return { series, plot: renderActivityPlot(series, 'month-activity'), description };
   }
 
   function renderHeatmap(series) {
@@ -968,7 +1010,7 @@
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">NOTICE THE SMALL WINS</p><h1>Your progress,<br/><span>at a glance.</span></h1><p>Look back with curiosity, not judgment. Every check-in is evidence that you made time for yourself.</p></div></header>
       <section class="stats-grid insight-stats" aria-label="Progress summary">${renderStatCard('7-day completion', `${average}%`, '', 'Average of your daily habits', 'chart', 'lime')}${renderStatCard('Days checked in', String(checkins), 'of 30', 'At least one habit completed', 'check-circle', 'blue')}${renderStatCard('Best streak', String(getBestStreak()), 'days', 'Your longest run so far', 'flame', 'amber')}${renderStatCard('Focus sessions', String(focusSessions), 'sessions', 'Completed with your timer', 'clock', 'violet')}</section>
       <div class="insights-layout"><div class="insights-main">
-        <section class="card insights-chart-card" aria-labelledby="month-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="month-chart-title">A month of little wins</h2><p>Daily completion for the last 30 days.</p></div></div><span class="chart-period">${icon('calendar', 12)} 30 days</span></div><div class="chart-summary"><strong>${monthlyAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="month-chart" role="img" aria-label="A bar chart of daily habit completion over the past 30 days">${chart.bars}</div><div class="month-x-labels"><span>${formatDate(series[0].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[9].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[19].date, { month: 'short', day: 'numeric' })}</span><span>Today</span></div></section>
+        <section class="card insights-chart-card" aria-labelledby="month-chart-title"><div class="card-header"><div class="card-heading"><span class="card-heading-icon">${icon('chart', 18)}</span><div class="card-heading-copy"><h2 id="month-chart-title">A month of little wins</h2><p>Daily completion for the last 30 days.</p></div></div><span class="chart-period">${icon('calendar', 12)} 30 days</span></div><div class="chart-summary"><strong>${monthlyAverage}%</strong><span>average completion</span><span class="chart-legend">Daily habits</span></div><div class="activity-chart month-activity-chart" role="img" aria-label="Daily habit completion across the last 30 days. ${escapeHtml(chart.description)}"><div class="activity-chart-axis" aria-hidden="true"><span>100%</span><span>50%</span><span>0%</span></div>${chart.plot}<div class="month-x-labels" aria-hidden="true"><span>${formatDate(series[0].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[9].date, { month: 'short', day: 'numeric' })}</span><span>${formatDate(series[19].date, { month: 'short', day: 'numeric' })}</span><span>Today</span></div></div></section>
         <div class="insights-bottom"><section class="card heatmap-card"><div class="card-heading-copy"><h2 class="card-title">Your consistency map</h2><p class="heatmap-intro">Planned days brighten as you check habits off; rest days stay quiet.</p></div>${renderHeatmap(series)}<div class="heatmap-legend"><span>Less</span><i class="heat-cell" data-level="0"></i><i class="heat-cell" data-level="1"></i><i class="heat-cell" data-level="2"></i><i class="heat-cell" data-level="3"></i><i class="heat-cell" data-level="4"></i><span>More</span></div></section><section class="card consistency-card"><div class="card-heading-copy"><h2 class="card-title">Habit consistency</h2><p class="heatmap-intro">Days completed in the last 30.</p></div>${renderConsistencyList(series)}</section></div>
       </div><aside class="insight-aside"><section class="card insight-note-card"><span class="insight-note-icon">${icon('sparkles', 19)}</span><h2>${insightHeading}</h2><p>${insightCopy}</p><div class="insight-callout">${icon('lightbulb', 14)}<span>Consistency is built in ordinary moments, not perfect ones.</span></div></section>${renderMoodInsight(series)}<section class="card insight-note-card"><span class="insight-note-icon">${icon('target', 19)}</span><h2>Keep it gentle.</h2><p>Try choosing just one habit to focus on this week. Once it feels natural, you can add another.</p><button class="button button-secondary button-small" type="button" data-view="habits" style="margin-top:15px">Review your habits ${icon('arrow', 13)}</button></section></aside></div>
       <p class="page-footnote">Your progress belongs to you. The numbers are here to help, never to judge.</p>

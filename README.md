@@ -15,7 +15,7 @@ Then visit `http://localhost:4173`.
 ## Features
 
 - Daily habit checklist with categories, time-of-day cues, and custom weekday schedules
-- Personal streaks, a 7-day activity chart, and 30-day insights/consistency map
+- Personal streaks, smooth 7- and 30-day activity line charts, and a 30-day consistency map
 - Flexible 7-, 14-, 30-, and 60-day challenges
 - Focus timer with 15-, 25-, and 45-minute sessions; sessions are counted automatically
 - Daily mood check-in and private reflection notes
