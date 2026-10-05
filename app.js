@@ -247,7 +247,14 @@
 
   function formatHabitTime(value) {
     const normalized = normalizeHabitTime(value);
-    return normalized === 'Anytime' ? 'Anytime' : formatClock(Number(normalized.slice(0, 2)));
+    if (normalized === 'Anytime') return normalized;
+    const startHour = Number(normalized.slice(0, 2));
+    const endHour = (startHour + 1) % 24;
+    const clockPart = (hour) => `${hour % 12 || 12}:00`;
+    const period = (hour) => hour < 12 ? 'AM' : 'PM';
+    return period(startHour) === period(endHour)
+      ? `${clockPart(startHour)}–${clockPart(endHour)} ${period(startHour)}`
+      : `${clockPart(startHour)} ${period(startHour)}–${clockPart(endHour)} ${period(endHour)}`;
   }
 
   function isUnmodifiedSuggestion(habit, suggestion) {
@@ -778,12 +785,12 @@
       ? `<div class="management-row-meta"><span class="category-pill">${escapeHtml(habit.category)}</span><span class="habit-time">${icon('clock', 10)}${escapeHtml(scheduledTime)}</span><span class="schedule-pill" title="${escapeHtml(formatSchedule(habit.days))}">${escapeHtml(formatSchedule(habit.days))}</span><span class="habit-streak-pill${streakDays ? ' is-active' : ''}" aria-label="${escapeHtml(streakLabel)}" title="${escapeHtml(streakLabel)}">${icon('flame', 11)}<strong>${streakDays}</strong><small>${streakDays === 1 ? 'day' : 'days'}</small></span>${renderHabitWeekStrip(habit)}</div>`
       : '';
     const dueTime = !managed
-      ? `<span class="habit-due-time" aria-label="${escapeHtml(habit.time === 'Anytime' ? 'No fixed time' : `Scheduled for ${scheduledTime}`)}">${icon('clock', 11)}<span>${habit.time === 'Anytime' ? 'Anytime' : `Due ${escapeHtml(scheduledTime)}`}</span></span>`
+      ? `<span class="habit-due-time" aria-label="${escapeHtml(habit.time === 'Anytime' ? 'No fixed time' : `Time range ${scheduledTime}`)}">${icon('clock', 11)}<span>${habit.time === 'Anytime' ? 'Anytime' : `Due ${escapeHtml(scheduledTime)}`}</span></span>`
       : '';
     const unavailable = managed && !scheduledToday;
     const actionLabel = unavailable
       ? `${name} is not scheduled today`
-      : `${checked ? 'Undo completion for' : 'Complete'} ${name}${habit.time === 'Anytime' ? '' : `, scheduled for ${scheduledTime}`}`;
+      : `${checked ? 'Undo completion for' : 'Complete'} ${name}${habit.time === 'Anytime' ? '' : `, time range ${scheduledTime}`}`;
     return `<li class="habit-row${checked ? ' is-complete' : ''}${unavailable ? ' is-off-day' : ''}">
       <span class="habit-symbol tone-${symbol}">${icon(symbol, 18)}</span>
       <div class="habit-copy">
@@ -1270,12 +1277,12 @@
     const activeDays = Array.isArray(existing?.days) ? existing.days : suggestion?.days || [0, 1, 2, 3, 4, 5, 6];
     const selectedTime = existing?.time || '';
     const categoryOptions = CATEGORIES.map((option) => `<option value="${option}"${category === option ? ' selected' : ''}>${option}</option>`).join('');
-    const timeOptions = `<option value="" disabled${selectedTime ? '' : ' selected'}>Choose a time</option><option value="Anytime"${selectedTime === 'Anytime' ? ' selected' : ''}>Anytime · no fixed time</option><optgroup label="Choose an hour">${PLAN_HOURS.map((hour) => `<option value="${hour}"${selectedTime === hour ? ' selected' : ''}>${formatClock(Number(hour.slice(0, 2)))}</option>`).join('')}</optgroup>`;
+    const timeOptions = `<option value="" disabled${selectedTime ? '' : ' selected'}>Choose a time range</option><option value="Anytime"${selectedTime === 'Anytime' ? ' selected' : ''}>Anytime · no fixed time</option><optgroup label="Choose a one-hour range">${PLAN_HOURS.map((hour) => `<option value="${hour}"${selectedTime === hour ? ' selected' : ''}>${formatHabitTime(hour)}</option>`).join('')}</optgroup>`;
     const dayOptions = WEEKDAYS.map((day) => `<label class="weekday-option" title="${WEEKDAY_NAMES[day.value]}"><input type="checkbox" name="days" value="${day.value}" aria-label="${WEEKDAY_NAMES[day.value]}"${activeDays.includes(day.value) ? ' checked' : ''}/><span>${day.label}</span></label>`).join('');
     const modalIntro = suggestion
-      ? 'Choose the clock time when this fits your day. It will not be added until you save.'
+      ? 'Choose the one-hour range that fits this habit. It will not be added until you save.'
       : 'Keep it simple, specific, and kind to your future self.';
-    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>${modalIntro}</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}" data-suggestion-id="${suggestion ? escapeHtml(suggestion.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || suggestion?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || suggestion?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-time-input">Usual time <span style="color:var(--subtle);font-weight:400">(choose one)</span></label><div class="modal-select-wrap"><select class="form-control" id="habit-time-input" name="time" required>${timeOptions}</select></div></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
+    document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="habit-modal-title"><header class="modal-header"><div><h2 id="habit-modal-title">${title}</h2><p>${modalIntro}</p></div><button class="icon-button" type="button" aria-label="Close dialog" data-action="close-modal">${icon('close', 17)}</button></header><form data-form="habit" data-id="${existing ? escapeHtml(existing.id) : ''}" data-suggestion-id="${suggestion ? escapeHtml(suggestion.id) : ''}"><div class="modal-body"><div class="modal-field"><label class="form-label" for="habit-name-input">Habit name</label><input class="form-control" id="habit-name-input" name="name" type="text" maxlength="56" required autocomplete="off" placeholder="e.g. Take a 10-minute walk" value="${escapeHtml(existing?.name || suggestion?.name || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-detail-input">A little reminder <span style="color:var(--subtle);font-weight:400">(optional)</span></label><input class="form-control" id="habit-detail-input" name="detail" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Around the block is enough" value="${escapeHtml(existing?.detail || suggestion?.detail || '')}"/></div><div class="modal-field"><label class="form-label" for="habit-category-input">Category</label><div class="modal-select-wrap"><select class="form-control" id="habit-category-input" name="category">${categoryOptions}</select></div></div><div class="modal-field"><label class="form-label" for="habit-time-input">Time range <span style="color:var(--subtle);font-weight:400">(one hour)</span></label><div class="modal-select-wrap"><select class="form-control" id="habit-time-input" name="time" required>${timeOptions}</select></div></div><fieldset class="modal-field weekday-field"><legend class="form-label">Repeat on</legend><div class="weekday-picker">${dayOptions}</div><p class="form-help">Pick the days that fit. The habit will stay off your list on rest days.</p></fieldset></div><footer class="modal-footer"><button class="button button-secondary button-small" type="button" data-action="close-modal">Cancel</button><button class="button button-primary button-small" type="submit">${existing ? 'Save changes' : 'Add habit'} ${icon('check', 14)}</button></footer></form></section></div>`;
     document.body.classList.add('has-modal');
     window.requestAnimationFrame(() => document.getElementById('habit-name-input')?.focus());
   }
@@ -1607,7 +1614,7 @@
       const category = CATEGORIES.includes(formData.get('category')) ? formData.get('category') : 'Other';
       const selectedTime = formData.get('time');
       if (!HABIT_TIMES.includes(selectedTime)) {
-        showToast('Choose a time or Anytime before saving.');
+        showToast('Choose a time range or Anytime before saving.');
         return;
       }
       const time = selectedTime;
