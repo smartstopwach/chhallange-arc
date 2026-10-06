@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daymark-pwa-v4';
+const CACHE_NAME = 'daymark-pwa-v5';
 const APP_ROOT = self.registration.scope;
 const APP_INDEX = new URL('index.html', APP_ROOT).href;
 const FIREBASE_SDK_ASSETS = [
@@ -99,4 +99,22 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(handleAsset(request));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const requestedUrl = new URL(event.notification.data?.url || APP_ROOT, self.location.origin);
+    const targetUrl = requestedUrl.origin === self.location.origin && requestedUrl.href.startsWith(APP_ROOT)
+      ? requestedUrl.href
+      : APP_ROOT;
+    const openWindows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const appWindow = openWindows.find((client) => client.url.startsWith(APP_ROOT));
+    if (appWindow) {
+      await appWindow.focus();
+      appWindow.postMessage({ type: 'daymark:open-today' });
+      return;
+    }
+    await self.clients.openWindow(targetUrl);
+  })());
 });

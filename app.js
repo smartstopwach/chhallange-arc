@@ -13,7 +13,10 @@
   let cloudSyncStatus = 'connecting';
   let pendingLegacyImport = false;
   let applyingRemoteState = false;
+  let pwaReminderTimer = null;
   const SIDEBAR_COLLAPSED_KEY = 'daymark.sidebarCollapsed.v1';
+  const PWA_NOTIFICATIONS_ENABLED_KEY = 'daymark.pwaNotificationsEnabled.v1';
+  const PWA_NOTIFICATIONS_SENT_KEY = 'daymark.pwaNotificationsSent.v1';
   const DAY_MS = 24 * 60 * 60 * 1000;
   const CATEGORIES = ['Wellness', 'Movement', 'Learning', 'Mindfulness', 'Rest', 'Other'];
   const LEGACY_HABIT_TIMES = ['Morning', 'Afternoon', 'Evening', 'Anytime'];
@@ -141,6 +144,113 @@
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
     } catch (_) {
       return false;
+    }
+  }
+
+  function isInstalledPwa() {
+    const standaloneDisplay = typeof window.matchMedia === 'function'
+      && window.matchMedia('(display-mode: standalone)').matches;
+    return Boolean(standaloneDisplay || (typeof navigator !== 'undefined' && navigator.standalone === true));
+  }
+
+  function supportsPwaNotifications() {
+    return isInstalledPwa()
+      && window.isSecureContext
+      && typeof Notification !== 'undefined'
+      && typeof navigator !== 'undefined'
+      && Boolean(navigator.serviceWorker);
+  }
+
+  function arePwaNotificationsEnabled() {
+    if (!isInstalledPwa()) return false;
+    try {
+      return localStorage.getItem(PWA_NOTIFICATIONS_ENABLED_KEY) === 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setPwaNotificationsEnabled(enabled) {
+    try {
+      localStorage.setItem(PWA_NOTIFICATIONS_ENABLED_KEY, enabled ? 'true' : 'false');
+      return true;
+    } catch (error) {
+      console.warn('Daymark could not save the PWA notification preference.', error);
+      return false;
+    }
+  }
+
+  async function enablePwaNotifications() {
+    if (!supportsPwaNotifications()) {
+      showToast('Open Daymark from its installed app icon to enable reminders.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      showToast('Allow notifications for Daymark in your device settings, then try again.');
+      renderApp();
+      return;
+    }
+    try {
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      if (permission !== 'granted') {
+        showToast('Notifications were not enabled. You can change this in device settings.');
+        renderApp();
+        return;
+      }
+      await navigator.serviceWorker.ready;
+      if (!setPwaNotificationsEnabled(true)) {
+        showToast('Your device could not save the reminder preference.');
+        return;
+      }
+      renderApp();
+      showToast('Habit reminders are on for this device.');
+    } catch (error) {
+      console.warn('Daymark could not enable PWA notifications.', error);
+      showToast('Daymark could not enable notifications. Check your device settings.');
+    }
+  }
+
+  async function disablePwaNotifications() {
+    if (!setPwaNotificationsEnabled(false)) {
+      showToast('Your device could not save the reminder preference.');
+      return;
+    }
+    clearPwaReminderTimer();
+    try {
+      if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+        const registration = await navigator.serviceWorker.ready;
+        const notifications = await registration.getNotifications();
+        notifications.filter((notification) => String(notification.tag || '').startsWith('daymark-habit-')
+          || notification.tag === 'daymark-pwa-notification-test')
+          .forEach((notification) => notification.close());
+      }
+    } catch (error) {
+      console.warn('Daymark could not close active PWA notifications.', error);
+    }
+    renderApp();
+    showToast('Habit reminders are paused.');
+  }
+
+  async function sendPwaTestNotification() {
+    if (!supportsPwaNotifications() || Notification.permission !== 'granted' || !arePwaNotificationsEnabled()) {
+      showToast('Enable habit reminders first, from the installed Daymark app.');
+      return;
+    }
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification('Daymark reminders are on', {
+        body: 'Your habit reminders will arrive at their scheduled start times.',
+        icon: new URL('./app-icon-192.png', window.location.href).href,
+        badge: new URL('./favicon-32.png', window.location.href).href,
+        tag: 'daymark-pwa-notification-test',
+        data: { url: new URL('./', window.location.href).href },
+      });
+      showToast('Test notification sent.');
+    } catch (error) {
+      console.warn('Daymark could not send a test PWA notification.', error);
+      showToast('Could not send a test notification. Check device settings.');
     }
   }
 
@@ -942,6 +1052,91 @@
       return habitHasStarted && isScheduled;
     });
   }
+
+  function readSentPwaReminderIds(dayKey) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PWA_NOTIFICATIONS_SENT_KEY) || 'null');
+      return saved?.day === dayKey && Array.isArray(saved.ids) ? new Set(saved.ids.map(String)) : new Set();
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function markPwaReminderSent(dayKey, habitId) {
+    const sentIds = readSentPwaReminderIds(dayKey);
+    sentIds.add(habitId);
+    try {
+      localStorage.setItem(PWA_NOTIFICATIONS_SENT_KEY, JSON.stringify({ day: dayKey, ids: [...sentIds].slice(-200) }));
+    } catch (error) {
+      console.warn('Daymark could not remember a PWA reminder.', error);
+    }
+  }
+
+  function getHabitReminderTime(dayKey, habit) {
+    if (!PLAN_HOURS.includes(habit.time)) return null;
+    const [hour, minute] = habit.time.split(':').map(Number);
+    const reminderAt = dateFromKey(dayKey);
+    reminderAt.setHours(hour, minute, 0, 0);
+    return reminderAt;
+  }
+
+  function clearPwaReminderTimer() {
+    if (pwaReminderTimer) window.clearTimeout(pwaReminderTimer);
+    pwaReminderTimer = null;
+  }
+
+  function syncPwaHabitReminders() {
+    clearPwaReminderTimer();
+    if (!authUser || !supportsPwaNotifications() || !arePwaNotificationsEnabled() || Notification.permission !== 'granted') return;
+
+    const todayKey = getTodayKey();
+    const now = Date.now();
+    const sentIds = readSentPwaReminderIds(todayKey);
+    const nextReminder = scheduledHabitsOn(todayKey)
+      .filter((habit) => habit.time !== 'Anytime' && !isCheckedOn(todayKey, habit.id) && !sentIds.has(habit.id))
+      .map((habit) => ({ habit, at: getHabitReminderTime(todayKey, habit) }))
+      .filter((item) => item.at && item.at.getTime() > now)
+      .sort((first, second) => first.at - second.at)[0];
+
+    if (!nextReminder) return;
+    const delay = Math.max(1000, nextReminder.at.getTime() - now);
+    pwaReminderTimer = window.setTimeout(() => {
+      pwaReminderTimer = null;
+      void showPwaHabitReminder(todayKey, nextReminder.habit.id, nextReminder.at.getTime());
+    }, Math.min(delay, 2_147_483_647));
+  }
+
+  async function showPwaHabitReminder(dayKey, habitId, scheduledAt) {
+    if (!authUser || !supportsPwaNotifications() || !arePwaNotificationsEnabled() || Notification.permission !== 'granted') return;
+    const habit = state.habits.find((item) => item.id === habitId);
+    const isDue = dayKey === getTodayKey()
+      && habit
+      && scheduledHabitsOn(dayKey).some((item) => item.id === habitId)
+      && !isCheckedOn(dayKey, habitId);
+    if (!isDue || Date.now() - scheduledAt > 15 * 60 * 1000 || readSentPwaReminderIds(dayKey).has(habitId)) {
+      syncPwaHabitReminders();
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      if (typeof registration.showNotification !== 'function') throw new Error('System notifications are not available in this PWA.');
+      await registration.showNotification('A small promise, now?', {
+        body: habit.detail ? `${habit.name} · ${habit.detail}` : `It is time for ${habit.name}.`,
+        icon: new URL('./app-icon-192.png', window.location.href).href,
+        badge: new URL('./favicon-32.png', window.location.href).href,
+        tag: `daymark-habit-${dayKey}-${habitId}`,
+        timestamp: scheduledAt,
+        data: { url: new URL('./', window.location.href).href },
+        renotify: false,
+      });
+      markPwaReminderSent(dayKey, habitId);
+    } catch (error) {
+      console.warn('Daymark could not show a PWA habit reminder.', error);
+    }
+    syncPwaHabitReminders();
+  }
+
   function completedHabitsOn(dayKey) { return scheduledHabitsOn(dayKey).filter((habit) => isCheckedOn(dayKey, habit.id)).length; }
   function completionPercent(dayKey) {
     const scheduled = scheduledHabitsOn(dayKey).length;
@@ -1144,6 +1339,7 @@
     const authGated = !authInitialized || !authUser;
     document.body.classList.toggle('auth-gated', authGated);
     applySidebarPreference();
+    syncPwaHabitReminders();
     if (authGated) {
       host.innerHTML = authInitialized ? renderLoginView() : renderAuthLoadingView();
       lastRenderedDay = renderedDay;
@@ -1773,11 +1969,32 @@
     return `<section class="card account-settings-card"><div class="account-settings-main"><span class="account-settings-avatar">${avatar}</span><div class="account-settings-copy"><span class="account-settings-label">SIGNED IN WITH GOOGLE</span><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(email)}</small></div></div><div class="account-settings-footer"><span class="account-sync-state" data-status="${escapeHtml(cloudSyncStatus)}"><i aria-hidden="true"></i>${escapeHtml(syncLabel)}</span><button class="button button-quiet button-small" type="button" data-action="sign-out">Sign out</button></div></section>`;
   }
 
+  function renderPwaNotificationSettings() {
+    if (!isInstalledPwa()) return '';
+    const supported = supportsPwaNotifications();
+    const permission = supported ? Notification.permission : 'unsupported';
+    const enabled = supported && permission === 'granted' && arePwaNotificationsEnabled();
+    const status = !supported
+      ? 'Unavailable on this device'
+      : permission === 'denied'
+        ? 'Blocked in device settings'
+        : enabled
+          ? 'On · this device'
+          : permission === 'granted'
+            ? 'Paused'
+            : 'Off';
+    const action = !supported || permission === 'denied'
+      ? `<button class="button button-secondary button-small" type="button" disabled>${permission === 'denied' ? 'Blocked' : 'Unavailable'}</button>`
+      : `<button class="button ${enabled ? 'button-quiet' : 'button-primary'} button-small" type="button" data-action="${enabled ? 'disable-pwa-notifications' : 'enable-pwa-notifications'}">${enabled ? 'Pause reminders' : 'Enable reminders'}</button>`;
+    return `<section class="card settings-card pwa-notifications-card"><div class="pwa-notifications-heading"><div><h2>Habit reminders</h2><p>Get one device notification at the start time of each unchecked, time-based habit. “Anytime” habits are skipped.</p></div><span class="pwa-notification-status${enabled ? ' is-enabled' : ''}" aria-live="polite">${escapeHtml(status)}</span></div><div class="pwa-notifications-footer"><span class="pwa-only-label">${icon('lock', 12)} Installed app only · stored on this device</span><div class="pwa-notification-actions">${enabled ? `<button class="button button-secondary button-small" type="button" data-action="test-pwa-notification">Send test</button>` : ''}${action}</div></div>${supported ? `<p class="pwa-notification-note">Reminders use your habit times while Daymark is open. Mobile devices may pause timers in the background or after closing the app; reliable closed-app delivery needs push setup.</p>` : `<p class="pwa-notification-note">This device or browser does not provide the system-notification support needed for PWA reminders.</p>`}${permission === 'denied' ? `<p class="pwa-notification-note is-warning">Allow notifications for Daymark in your device settings, then reopen the app.</p>` : ''}</section>`;
+  }
+
   function renderSettingsView() {
     return `<div class="settings-view">
       <header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">MAKE THIS SPACE YOURS</p><h1>A little more<br/><span>personal.</span></h1><p>Manage your profile, signed-in device, and synchronized progress.</p></div></header>
       <div class="settings-layout"><div class="settings-stack">
         ${renderAccountSettingsCard()}
+        ${renderPwaNotificationSettings()}
         <section class="card settings-card"><h2>Your profile</h2><p>Choose the name you would like to see around Daymark. It is saved with your synced workspace.</p><form class="settings-form" data-form="profile"><div><label class="form-label" for="profile-name-input">Display name</label><input class="form-control" id="profile-name-input" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="What should we call you?" value="${escapeHtml(state.name)}"/><p class="form-help">Leave this empty if you prefer a quiet, nameless workspace.</p></div><button class="button button-primary button-small" type="submit">Save profile ${icon('check', 14)}</button></form></section>
         <section class="card settings-card"><h2>Your data</h2><p>Your habits, schedules, moods, focus sessions, and plans save instantly on this device, then sync to your private Firestore account when online. Export a copy any time.</p><div class="data-action-list"><div class="data-action-row"><div class="data-action-copy"><strong>Export your data</strong><small>Download a JSON backup of your habits and progress.</small></div><button class="button button-secondary button-small" type="button" data-action="export">${icon('download', 14)} Export</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Clear activity</strong><small>Remove check-ins, mood notes, focus sessions, and tomorrow's goals. Keep your habits.</small></div><button class="button button-quiet button-small" type="button" data-action="clear-activity">Clear activity</button></div><div class="data-action-row"><div class="data-action-copy"><strong>Start fresh</strong><small>Clear saved progress and start with no active habits. Add only what you choose.</small></div><button class="button button-danger button-small" type="button" data-action="reset-all">Reset app</button></div></div></section>
       </div><aside class="card settings-side-card"><span class="privacy-icon">${icon('lock', 19)}</span><h2>Your space, kept yours.</h2><p>Sign-in is required. Your Daymark document is scoped to your Google account, protected by Firebase rules, and cached locally for quick access when you are offline.</p><span class="local-storage-badge">${icon('check-circle', 12)} Saved locally · cloud sync</span><div class="card-note" style="margin-top:20px">${icon('sparkles', 13)}<span>Your progress stays private to your signed-in account and syncs across your devices.</span></div></aside></div>
@@ -1972,6 +2189,15 @@
         break;
       case 'sign-out':
         beginSignOut();
+        break;
+      case 'enable-pwa-notifications':
+        void enablePwaNotifications();
+        break;
+      case 'disable-pwa-notifications':
+        void disablePwaNotifications();
+        break;
+      case 'test-pwa-notification':
+        void sendPwaTestNotification();
         break;
       case 'insights-range': {
         const requestedDays = Number(actionElement.dataset.days);
@@ -2348,6 +2574,19 @@
     cloudSyncStatus = 'offline';
     updateCloudSyncIndicator();
   });
+  window.addEventListener('focus', syncPwaHabitReminders);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) syncPwaHabitReminders();
+  });
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (!isInstalledPwa() || event.data?.type !== 'daymark:open-today') return;
+      currentView = 'today';
+      editingFocus = false;
+      renderApp();
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    });
+  }
   window.addEventListener('pagehide', () => { void flushCloudSave(); });
 
   // Use the local calendar date for all summaries and keep the shell's icons accessible.

@@ -37,6 +37,8 @@ On the first Google sign-in, existing browser-only Daymark data is carried into 
 
 On supported Chrome/Edge browsers, select **Install** when the button appears or use the browser's install option. On iPhone or iPad, open Daymark in Safari and choose **Share → Add to Home Screen**. Load the site once while online so the app shell and Firebase SDK modules can be cached for offline startup. Cloud sync needs a connection, but previously signed-in users can continue working from their local cache.
 
+Notification settings appear only when Daymark is opened as an installed PWA, never in the regular website. In **Settings → Habit reminders**, users can opt in to a local system notification at the start time of each unchecked, time-based habit. Mobile browsers may pause local scheduling in the background or when the PWA is closed; reliable closed-app delivery requires a separate push-notification backend.
+
 ## Features
 
 - Required Google sign-in with a dedicated responsive login screen and account-scoped cloud sync
@@ -54,3 +56,4 @@ On supported Chrome/Edge browsers, select **Install** when the button appears or
 - Profile preferences, JSON export, and reset controls
 - Responsive layout and keyboard-accessible controls, tuned for phone and tablet screens
 - Installable PWA with offline app-shell caching, service-worker updates, install prompt, and mobile home-screen icons
+- Opt-in, device-local habit notifications shown only in the installed PWA; no website permission prompt, with closed-app delivery noted as requiring push infrastructure

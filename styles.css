@@ -1139,6 +1139,20 @@ body.auth-gated #app-content { min-height: 100vh; }
 .settings-card { padding: 20px; }
 .settings-card h2 { margin: 0; color: #e8eee7; font-size: 14px; font-weight: 700; }
 .settings-card > p { margin: 7px 0 17px; color: #879287; font-size: 10px; line-height: 1.65; }
+.pwa-notifications-card { border-color: #374431; background: linear-gradient(145deg, #1e251d, #191e1a); }
+.pwa-notifications-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.pwa-notifications-heading > div { min-width: 0; }
+.pwa-notifications-heading p { margin: 7px 0 0; color: #879287; font-size: 10px; line-height: 1.6; }
+.pwa-notification-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #3d453c; border-radius: 999px; background: #242a24; color: #9ba598; font-size: 9px; font-weight: 600; }
+.pwa-notification-status::before { width: 6px; height: 6px; border-radius: 50%; background: #778176; content: ''; }
+.pwa-notification-status.is-enabled { border-color: #485b3b; background: #293323; color: #c4d9a5; }
+.pwa-notification-status.is-enabled::before { background: #c5ee78; box-shadow: 0 0 8px rgb(197 238 120 / 28%); }
+.pwa-notifications-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; padding-top: 12px; border-top: 1px solid #2c342c; }
+.pwa-notification-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.pwa-only-label { display: inline-flex; align-items: center; gap: 6px; color: #819080; font-size: 9px; }
+.pwa-only-label svg { width: 12px; height: 12px; color: #acbf91; }
+.settings-card > .pwa-notification-note { margin: 11px 0 0; color: #738073; font-size: 9px; line-height: 1.55; }
+.settings-card > .pwa-notification-note.is-warning { color: #d2a68d; }
 .settings-form { display: grid; gap: 10px; max-width: 410px; }
 .form-label { display: block; margin-bottom: 6px; color: #b6c0b5; font-size: 10px; font-weight: 600; }
 .form-control {
@@ -1487,4 +1501,7 @@ body.has-modal { overflow: hidden; }
   .auth-description { font-size: 12px; }
   .auth-footer { bottom: max(17px, env(safe-area-inset-bottom, 0px)); font-size: 9px; }
   .account-settings-card { padding: 15px 14px 12px; }
+  .pwa-notifications-heading { flex-direction: column; }
+  .pwa-notifications-footer { align-items: flex-start; flex-direction: column; }
+  .pwa-notification-actions { width: 100%; flex-wrap: wrap; }
 }
