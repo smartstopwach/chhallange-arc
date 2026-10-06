@@ -245,6 +245,18 @@
 
   function isRecord(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 
+  // Firestore can return map fields in a different key order than localStorage.
+  // Compare normalized state by value, not by JavaScript object insertion order,
+  // or an identical snapshot can be mistaken for a conflict and resaved forever.
+  function stableStringify(value) {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (isRecord(value)) {
+      const fields = Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+      return `{${fields.join(',')}}`;
+    }
+    return JSON.stringify(value);
+  }
+
   function normalizeSkippedHabitSuggestions(value) {
     if (!Array.isArray(value)) return [];
     const suggestionIds = new Set(makeHabitSuggestions().map((habit) => habit.id));
@@ -769,7 +781,7 @@
       return;
     }
     const equalVersionConflict = remoteUpdatedAt === localUpdatedAt
-      && JSON.stringify(remote) !== JSON.stringify(state);
+      && stableStringify(remote) !== stableStringify(state);
     if (!hasMeaningfulState(state) || remoteUpdatedAt > localUpdatedAt) {
       cloudSyncStatus = 'synced';
       applyRemoteState(snapshot.state, remoteUpdatedAt);
