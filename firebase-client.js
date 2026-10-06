@@ -91,13 +91,14 @@ async function initializeDaymarkFirebase() {
       try {
         const provider = new authSdk.GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-          || (navigator.maxTouchPoints > 1 && window.matchMedia('(max-width: 900px)').matches);
         const installedPwa = window.matchMedia('(display-mode: standalone)').matches
           || navigator.standalone === true;
-        // A popup avoids the cross-site redirect storage path in installed PWAs.
-        // Keep the redirect-first flow for ordinary mobile browser tabs.
-        if (mobile && !installedPwa) {
+        const iosHomeScreenApp = installedPwa
+          && (navigator.standalone === true || /iPhone|iPad|iPod/i.test(navigator.userAgent));
+        // On GitHub Pages, redirect sign-in can lose Firebase's third-party
+        // helper storage. Use a user-initiated popup by default; iOS home-screen
+        // apps use redirect because iOS cannot reliably keep a popup attached.
+        if (iosHomeScreenApp) {
           await authSdk.signInWithRedirect(auth, provider);
           return;
         }

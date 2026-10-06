@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daymark-pwa-v6';
+const CACHE_NAME = 'daymark-pwa-v7';
 const APP_ROOT = self.registration.scope;
 const APP_INDEX = new URL('index.html', APP_ROOT).href;
 const FIREBASE_SDK_ASSETS = [
