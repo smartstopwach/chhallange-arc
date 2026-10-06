@@ -763,6 +763,25 @@ body.auth-gated #app-content { min-height: 100vh; }
 .timer-card-featured .timer-presets { gap: 9px; margin: 17px 0 15px; }
 .timer-card-featured .timer-preset { min-height: 38px; font-size: 10px; }
 .timer-card-featured .timer-controls .button { min-height: 43px; }
+.timer-mode-switch { display: grid; width: min(100%, 380px); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 19px auto 0; padding: 4px; border: 1px solid #39343f; border-radius: 11px; background: rgb(14 16 15 / 62%); }
+.timer-mode-button { display: flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 7px 11px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #99949f; cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.timer-mode-button:hover:not(:disabled) { color: #ece8f1; }
+.timer-mode-button.is-active { border-color: #4b4356; background: linear-gradient(135deg, #322b3a, #27282a); color: #e4d3f5; box-shadow: 0 3px 12px rgb(0 0 0 / 16%); }
+.timer-mode-button:disabled { cursor: not-allowed; opacity: .72; }
+.timer-mode-button svg { width: 14px; height: 14px; }
+.timer-card-featured .timer-mode-switch + .timer-display-row { margin-top: 24px; }
+.timer-display-row-stopwatch { justify-content: flex-start; }
+.stopwatch-readout strong { font-variant-numeric: tabular-nums; }
+.timer-card-featured.is-stopwatch-mode .stopwatch-readout strong { font-size: clamp(42px, 6vw, 66px); letter-spacing: -1.5px; }
+.timer-card-featured.is-stopwatch-mode .timer-display-row-stopwatch { margin-bottom: 21px; }
+.pomodoro-notification-control { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 16px; padding: 12px 13px; border: 1px solid #3c3941; border-radius: 10px; background: rgb(15 17 16 / 48%); }
+.pomodoro-notification-copy { display: grid; min-width: 0; gap: 4px; }
+.pomodoro-notification-copy strong { color: #d9d4df; font-size: 10px; font-weight: 700; }
+.pomodoro-notification-copy small { color: #89858e; font-size: 9px; line-height: 1.45; }
+.pomodoro-notification-toggle { min-width: 70px; min-height: 34px; flex: 0 0 auto; padding: 6px 12px; border: 1px solid #48434f; border-radius: 8px; background: #27242d; color: #d4ccdf; cursor: pointer; font: inherit; font-size: 9px; font-weight: 700; transition: background .16s ease, border-color .16s ease, color .16s ease; }
+.pomodoro-notification-toggle:hover:not(:disabled) { border-color: #756289; color: #f1e8fa; }
+.pomodoro-notification-toggle.is-enabled { border-color: #556744; background: #293423; color: #d5ecb1; }
+.pomodoro-notification-toggle:disabled { cursor: not-allowed; opacity: .55; }
 
 .pomodoro-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(255px, .65fr); align-items: start; gap: 15px; }
 .pomodoro-main-column, .pomodoro-aside { display: grid; min-width: 0; gap: 15px; }

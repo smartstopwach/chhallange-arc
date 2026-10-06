@@ -18,6 +18,7 @@
   const SIDEBAR_COLLAPSED_KEY = 'daymark.sidebarCollapsed.v1';
   const PWA_NOTIFICATIONS_ENABLED_KEY = 'daymark.pwaNotificationsEnabled.v1';
   const PWA_NOTIFICATIONS_SENT_KEY = 'daymark.pwaNotificationsSent.v1';
+  const PWA_POMODORO_NOTIFICATIONS_KEY = 'daymark.pwaPomodoroNotificationsEnabled.v1';
   const DAY_MS = 24 * 60 * 60 * 1000;
   const CATEGORIES = ['Wellness', 'Movement', 'Learning', 'Mindfulness', 'Rest', 'Other'];
   const LEGACY_HABIT_TIMES = ['Morning', 'Afternoon', 'Evening', 'Anytime'];
@@ -116,6 +117,7 @@
     check: '<path d="m5 12 4 4L19 6"/>',
     'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 9"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    stopwatch: '<circle cx="12" cy="14" r="7.5"/><path d="M12 10v4l2.5 1.5M9.5 2h5M12 2v4M17.5 8.5 19 7"/>',
     calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 9.5h17"/><path d="M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/>',
     search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/>',
     flame: '<path d="M12 22c4.2 0 7-2.8 7-6.7 0-2.7-1.5-4.9-4.6-7.1.2 2.2-1 3.3-2.2 3.8.2-3.9-1.5-7-5.4-9.8.3 3.6-.5 5.5-2.3 8.1A8.1 8.1 0 0 0 3 15.1C3 19.1 6.3 22 12 22Z"/><path d="M12 22c2 0 3.4-1.4 3.4-3.2 0-1.2-.6-2.2-1.9-3.3.1 1.3-.5 1.7-1.1 2-.1-1.8-.9-3.1-2.5-4.2.1 1.8-.3 2.6-1 3.6-.5.7-.8 1.3-.8 2 0 1.8 1.5 3.1 3.9 3.1Z"/>',
@@ -255,6 +257,143 @@
     }
   }
 
+  function arePwaPomodoroNotificationsEnabled() {
+    if (!isInstalledPwa()) return false;
+    try {
+      return localStorage.getItem(PWA_POMODORO_NOTIFICATIONS_KEY) === 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setPwaPomodoroNotificationsEnabled(enabled) {
+    try {
+      localStorage.setItem(PWA_POMODORO_NOTIFICATIONS_KEY, enabled ? 'true' : 'false');
+      return true;
+    } catch (error) {
+      console.warn('Daymark could not save the Pomodoro notification preference.', error);
+      return false;
+    }
+  }
+
+  async function closePwaPomodoroNotifications(includeCompleted = true) {
+    if (!supportsPwaNotifications()) return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const notifications = typeof registration.getNotifications === 'function'
+        ? await registration.getNotifications()
+        : [];
+      notifications.filter((notification) => notification.tag === 'daymark-pomodoro-live'
+        || (includeCompleted && notification.tag === 'daymark-pomodoro-finished'))
+        .forEach((notification) => notification.close());
+    } catch (error) {
+      console.warn('Daymark could not close Pomodoro notifications.', error);
+    }
+  }
+
+  async function updatePwaPomodoroLiveNotification(remaining, status = 'running', force = false) {
+    if (!authUser || !supportsPwaNotifications() || Notification.permission !== 'granted'
+      || !arePwaPomodoroNotificationsEnabled()) return;
+    const safeRemaining = Math.max(0, Math.floor(Number(remaining) || 0));
+    const minuteBucket = Math.ceil(safeRemaining / 60);
+    if (!force && minuteBucket === lastPomodoroNotificationMinute && status === lastPomodoroNotificationStatus) return;
+    lastPomodoroNotificationMinute = minuteBucket;
+    lastPomodoroNotificationStatus = status;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const paused = status === 'paused';
+      await registration.showNotification(
+        paused ? 'Pomodoro paused' : `Pomodoro · ${formatTimer(safeRemaining)} left`,
+        {
+          body: paused
+            ? `Your focus session is paused at ${formatTimer(safeRemaining)} remaining.`
+            : 'Your focus session is running. Tap to return to Daymark.',
+          icon: new URL('./app-icon-192.png', window.location.href).href,
+          badge: new URL('./favicon-32.png', window.location.href).href,
+          tag: 'daymark-pomodoro-live',
+          renotify: false,
+          silent: true,
+          requireInteraction: true,
+          timestamp: Date.now(),
+          data: { url: new URL('./', window.location.href).href },
+        },
+      );
+    } catch (error) {
+      console.warn('Daymark could not update the Pomodoro notification.', error);
+    }
+  }
+
+  async function showPwaPomodoroFinishedNotification() {
+    if (!authUser || !supportsPwaNotifications() || Notification.permission !== 'granted'
+      || !arePwaPomodoroNotificationsEnabled()) return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const notifications = typeof registration.getNotifications === 'function'
+        ? await registration.getNotifications()
+        : [];
+      notifications.filter((notification) => notification.tag === 'daymark-pomodoro-live'
+        || notification.tag === 'daymark-pomodoro-finished')
+        .forEach((notification) => notification.close());
+      await registration.showNotification('Pomodoro complete', {
+        body: 'Your focus session is finished. Take a breath before the next one.',
+        icon: new URL('./app-icon-192.png', window.location.href).href,
+        badge: new URL('./favicon-32.png', window.location.href).href,
+        tag: 'daymark-pomodoro-finished',
+        renotify: true,
+        requireInteraction: true,
+        data: { url: new URL('./', window.location.href).href },
+      });
+    } catch (error) {
+      console.warn('Daymark could not show the Pomodoro completion notification.', error);
+    }
+  }
+
+  async function togglePwaPomodoroNotifications() {
+    if (arePwaPomodoroNotificationsEnabled()) {
+      if (!setPwaPomodoroNotificationsEnabled(false)) {
+        showToast('Your device could not save this notification setting.');
+        return;
+      }
+      lastPomodoroNotificationMinute = null;
+      lastPomodoroNotificationStatus = '';
+      await closePwaPomodoroNotifications();
+      renderApp();
+      showToast('Pomodoro live notifications are off.');
+      return;
+    }
+    if (!supportsPwaNotifications()) {
+      showToast('Open Daymark from its installed app icon to use live notifications.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      showToast('Allow notifications for Daymark in your device settings, then try again.');
+      renderApp();
+      return;
+    }
+    try {
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      if (permission !== 'granted') {
+        showToast('Notifications were not enabled. You can change this in device settings.');
+        renderApp();
+        return;
+      }
+      await navigator.serviceWorker.ready;
+      if (!setPwaPomodoroNotificationsEnabled(true)) {
+        showToast('Your device could not save this notification setting.');
+        return;
+      }
+      lastPomodoroNotificationMinute = null;
+      lastPomodoroNotificationStatus = '';
+      renderApp();
+      showToast('Pomodoro live notifications are on for this device.');
+    } catch (error) {
+      console.warn('Daymark could not enable Pomodoro notifications.', error);
+      showToast('Daymark could not enable notifications. Check device settings.');
+    }
+  }
+
   let state = loadState();
   let sidebarCollapsed = readSidebarPreference();
   let currentView = 'today';
@@ -269,6 +408,10 @@
   let reflectionDraft = '';
   let toastTimer = null;
   let timerTicker = null;
+  let stopwatchTicker = null;
+  let lastPomodoroNotificationMinute = null;
+  let lastPomodoroNotificationStatus = '';
+  let lastPwaPomodoroMode = '';
   let lastRenderedDay = '';
 
   function icon(name, size = 18) {
@@ -348,7 +491,13 @@
       focus: {},
       reflections: {},
       sessions: {},
-      timer: { duration: 25 * 60, remaining: 25 * 60, endsAt: null },
+      timer: {
+        duration: 25 * 60,
+        remaining: 25 * 60,
+        endsAt: null,
+        mode: 'pomodoro',
+        stopwatch: { elapsed: 0, startedAt: null },
+      },
       challenge: { id: firstChallenge.id, startDate: dateKey(new Date()) },
       updatedAt: 0,
     };
@@ -602,11 +751,12 @@
   function normalizeTimer(value) {
     const defaultDuration = 25 * 60;
     const validDurations = TIMER_PRESETS.map((minutes) => minutes * 60);
-    const duration = isRecord(value) && validDurations.includes(Number(value.duration)) ? Number(value.duration) : defaultDuration;
-    let remaining = isRecord(value) && Number.isFinite(Number(value.remaining))
-      ? Math.max(0, Math.min(duration, Math.ceil(Number(value.remaining))))
+    const source = isRecord(value) ? value : {};
+    const duration = validDurations.includes(Number(source.duration)) ? Number(source.duration) : defaultDuration;
+    let remaining = Number.isFinite(Number(source.remaining))
+      ? Math.max(0, Math.min(duration, Math.ceil(Number(source.remaining))))
       : duration;
-    let endsAt = isRecord(value) && value.endsAt !== null && value.endsAt !== undefined && Number.isFinite(Number(value.endsAt)) ? Number(value.endsAt) : null;
+    let endsAt = source.endsAt !== null && source.endsAt !== undefined && Number.isFinite(Number(source.endsAt)) ? Number(source.endsAt) : null;
     let justFinished = false;
     if (endsAt && endsAt > Date.now()) remaining = Math.max(0, Math.min(duration, Math.ceil((endsAt - Date.now()) / 1000)));
     else if (endsAt) {
@@ -614,7 +764,24 @@
       remaining = 0;
       justFinished = true;
     }
-    return { duration, remaining, endsAt, justFinished };
+    const stopwatchSource = isRecord(source.stopwatch) ? source.stopwatch : {};
+    const elapsedValue = Number(stopwatchSource.elapsed);
+    const startedAtValue = Number(stopwatchSource.startedAt);
+    const stopwatch = {
+      elapsed: Number.isFinite(elapsedValue) ? Math.max(0, Math.min(366 * 24 * 60 * 60, Math.floor(elapsedValue))) : 0,
+      startedAt: stopwatchSource.startedAt !== null && stopwatchSource.startedAt !== undefined
+        && Number.isFinite(startedAtValue) && startedAtValue > 0
+        ? startedAtValue
+        : null,
+    };
+    return {
+      duration,
+      remaining,
+      endsAt,
+      mode: source.mode === 'stopwatch' ? 'stopwatch' : 'pomodoro',
+      stopwatch,
+      justFinished,
+    };
   }
 
   function normalizeStateData(saved) {
@@ -707,6 +874,9 @@
       || Object.keys(candidate.reflections || {}).length > 0
       || Object.keys(candidate.sessions || {}).length > 0
       || Boolean(timer.endsAt)
+      || Boolean(timer.stopwatch?.startedAt)
+      || Number(timer.stopwatch?.elapsed) > 0
+      || timer.mode === 'stopwatch'
       || Number(timer.duration) !== 25 * 60
       || Number(timer.remaining) !== Number(timer.duration);
   }
@@ -847,9 +1017,10 @@
     saveState({ touch: false, sync: false });
     applyingRemoteState = false;
     if (normalizedResult.recoveredFinishedTimer) scheduleCloudSave();
-    if (timerTicker) window.clearInterval(timerTicker);
-    timerTicker = null;
+    stopTimerTicker();
+    stopStopwatchTicker();
     if (state.timer.endsAt) startTimerTicker();
+    if (isStopwatchRunning()) startStopwatchTicker();
     renderApp();
   }
 
@@ -953,8 +1124,12 @@
         activeStorageKey = STORAGE_KEY;
         pendingLegacyImport = false;
         state = makeDefaultState();
-        if (timerTicker) window.clearInterval(timerTicker);
-        timerTicker = null;
+        stopTimerTicker();
+        stopStopwatchTicker();
+        lastPomodoroNotificationMinute = null;
+        lastPomodoroNotificationStatus = '';
+        lastPwaPomodoroMode = '';
+        void closePwaPomodoroNotifications();
       }
       cloudSyncStatus = 'connecting';
       renderApp();
@@ -966,6 +1141,10 @@
       return;
     }
     stopCloudSync();
+    lastPomodoroNotificationMinute = null;
+    lastPomodoroNotificationStatus = '';
+    lastPwaPomodoroMode = '';
+    void closePwaPomodoroNotifications();
     authUser = incomingUser;
     const userStorageKey = `${STORAGE_KEY}.user.${incomingUser.uid}`;
     let hasUserCache = false;
@@ -988,9 +1167,10 @@
       }
     }
     saveState({ touch: false, sync: false });
-    if (timerTicker) window.clearInterval(timerTicker);
-    timerTicker = null;
+    stopTimerTicker();
+    stopStopwatchTicker();
     if (state.timer.endsAt) startTimerTicker();
+    if (isStopwatchRunning()) startStopwatchTicker();
     currentView = 'today';
     cloudSyncStatus = 'syncing';
     renderApp();
@@ -1274,8 +1454,21 @@
     return Math.max(0, Math.min(state.timer.duration, state.timer.remaining));
   }
   function isTimerRunning() { return Boolean(state.timer.endsAt && getTimerRemaining() > 0); }
+  function getStopwatchElapsed() {
+    const stopwatch = state.timer.stopwatch || { elapsed: 0, startedAt: null };
+    const runningSeconds = stopwatch.startedAt ? Math.max(0, Math.floor((Date.now() - stopwatch.startedAt) / 1000)) : 0;
+    return Math.max(0, Math.floor(Number(stopwatch.elapsed) || 0) + runningSeconds);
+  }
+  function isStopwatchRunning() { return Boolean(state.timer.stopwatch?.startedAt); }
+  function isFocusTimerRunning() { return isTimerRunning() || isStopwatchRunning(); }
   function formatTimer(seconds) {
     return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
+  }
+  function formatStopwatch(seconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    return `${String(hours).padStart(2, '0')}:${pad2(minutes)}:${pad2(safeSeconds % 60)}`;
   }
   function getMoodLabel(moodId) { return MOODS.find((mood) => mood.id === moodId)?.label || ''; }
 
@@ -1352,6 +1545,7 @@
       document.title = authInitialized ? 'Sign in · Daymark' : 'Daymark';
       return;
     }
+    syncPwaPomodoroNotificationOnRender();
     const pages = {
       today: renderTodayView,
       habits: renderHabitsView,
@@ -1610,18 +1804,62 @@
     </section>`;
   }
 
+  function renderPwaPomodoroNotificationControl() {
+    if (!isInstalledPwa()) return '';
+    const supported = supportsPwaNotifications();
+    const preferenceEnabled = arePwaPomodoroNotificationsEnabled();
+    const permissionBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
+    const isEnabled = supported && Notification.permission === 'granted' && preferenceEnabled;
+    const label = isEnabled ? 'On' : preferenceEnabled ? 'Turn off' : permissionBlocked ? 'Blocked' : 'Turn on';
+    const description = permissionBlocked
+      ? 'Allow notifications for Daymark in device settings.'
+      : !supported
+        ? 'Allow notifications for the installed Daymark app.'
+        : state.timer.mode === 'stopwatch'
+          ? 'For Pomodoro sessions only; Stopwatch runs without alerts.'
+          : 'Updates every minute while this PWA is active.';
+    return `<div class="pomodoro-notification-control"><div class="pomodoro-notification-copy"><strong>Live Pomodoro notification</strong><small>${description}</small></div><button class="pomodoro-notification-toggle${isEnabled ? ' is-enabled' : ''}" type="button" data-action="toggle-pomodoro-notifications" aria-pressed="${isEnabled}"${!supported || (permissionBlocked && !preferenceEnabled) ? ' disabled' : ''}>${label}</button></div>`;
+  }
+
   function renderFocusTimerCard(featured = false) {
+    const stopwatchMode = state.timer.mode === 'stopwatch';
+    const running = stopwatchMode ? isStopwatchRunning() : isTimerRunning();
+    const anyTimerRunning = isFocusTimerRunning();
     const remaining = getTimerRemaining();
-    const running = isTimerRunning();
+    const elapsed = getStopwatchElapsed();
     const sessionsToday = state.sessions[getTodayKey()] || 0;
     const progress = Math.round(((state.timer.duration - remaining) / state.timer.duration) * 100);
-    const status = running ? 'Stay with one thing. You have got this.' : remaining === 0 ? 'Session complete. Take a breath before the next thing.' : 'A small, focused sprint is enough.';
-    return `<section class="card timer-card${featured ? ' timer-card-featured' : ''}" aria-labelledby="focus-timer-title">
-      <div class="card-header"><div class="card-heading"><span class="card-heading-icon timer-heading-icon">${icon('clock', 18)}</span><div class="card-heading-copy"><h2 id="focus-timer-title">${featured ? 'Pomodoro timer' : 'Focus timer'}</h2><p>${featured ? 'Choose a sprint and stay with one thing.' : 'Give one thing your full attention.'}</p></div></div><span class="timer-live-label${running ? ' is-running' : ''}">${running ? 'IN SESSION' : 'POMODORO'}</span></div>
-      <div class="timer-display-row"><div class="timer-readout"><strong id="focus-timer-time">${formatTimer(remaining)}</strong><span id="focus-timer-status">${status}</span></div><div class="timer-session-count"><strong>${sessionsToday}</strong><span>sessions today</span></div></div>
-      <div class="timer-progress-track" role="progressbar" aria-label="Focus session progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span id="focus-timer-progress-fill" style="width:${progress}%"></span></div>
-      <div class="timer-presets" role="group" aria-label="Focus session length">${TIMER_PRESETS.map((minutes) => `<button type="button" class="timer-preset${state.timer.duration === minutes * 60 ? ' is-selected' : ''}" data-action="timer-preset" data-minutes="${minutes}" aria-pressed="${state.timer.duration === minutes * 60}"${running ? ' disabled' : ''}>${minutes} min</button>`).join('')}</div>
-      <div class="timer-controls"><button id="focus-timer-toggle" class="button button-primary button-small" type="button" data-action="timer-toggle">${icon(running ? 'pause' : 'play', 14)} ${running ? 'Pause session' : remaining === 0 ? 'Start again' : 'Start focus'}</button><button class="button button-secondary button-small" type="button" data-action="timer-reset">Reset</button></div>
+    const status = stopwatchMode
+      ? running ? 'Counting up. Your time is saved as you go.' : elapsed ? `Paused at ${formatStopwatch(elapsed)}.` : 'Count up without a time limit.'
+      : running ? 'Stay with one thing. You have got this.' : remaining === 0 ? 'Session complete. Take a breath before the next thing.' : 'A small, focused sprint is enough.';
+    const modeSwitch = featured
+      ? `<div class="timer-mode-switch" role="group" aria-label="Choose timer mode"><button class="timer-mode-button${stopwatchMode ? '' : ' is-active'}" type="button" aria-pressed="${!stopwatchMode}" data-action="timer-mode" data-mode="pomodoro"${anyTimerRunning ? ' disabled' : ''}>${icon('clock', 14)} Pomodoro</button><button class="timer-mode-button${stopwatchMode ? ' is-active' : ''}" type="button" aria-pressed="${stopwatchMode}" data-action="timer-mode" data-mode="stopwatch"${anyTimerRunning ? ' disabled' : ''}>${icon('stopwatch', 14)} Stopwatch</button></div>`
+      : '';
+    const readout = stopwatchMode
+      ? `<div class="timer-display-row timer-display-row-stopwatch"><div class="timer-readout stopwatch-readout"><strong id="stopwatch-time">${formatStopwatch(elapsed)}</strong><span id="stopwatch-status">${status}</span></div></div>`
+      : `<div class="timer-display-row"><div class="timer-readout"><strong id="focus-timer-time">${formatTimer(remaining)}</strong><span id="focus-timer-status">${status}</span></div><div class="timer-session-count"><strong>${sessionsToday}</strong><span>sessions today</span></div></div>`;
+    const progressTrack = stopwatchMode
+      ? ''
+      : `<div class="timer-progress-track" role="progressbar" aria-label="Focus session progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span id="focus-timer-progress-fill" style="width:${progress}%"></span></div>`;
+    const presets = stopwatchMode
+      ? ''
+      : `<div class="timer-presets" role="group" aria-label="Focus session length">${TIMER_PRESETS.map((minutes) => `<button type="button" class="timer-preset${state.timer.duration === minutes * 60 ? ' is-selected' : ''}" data-action="timer-preset" data-minutes="${minutes}" aria-pressed="${state.timer.duration === minutes * 60}"${anyTimerRunning ? ' disabled' : ''}>${minutes} min</button>`).join('')}</div>`;
+    const toggleLabel = running
+      ? stopwatchMode ? 'Pause stopwatch' : 'Pause session'
+      : stopwatchMode ? elapsed ? 'Resume stopwatch' : 'Start stopwatch' : remaining === 0 ? 'Start again' : 'Start focus';
+    const statusLabel = running ? (stopwatchMode ? 'STOPWATCH RUNNING' : 'IN SESSION') : stopwatchMode ? 'STOPWATCH' : 'POMODORO';
+    const heading = stopwatchMode ? 'Stopwatch' : featured ? 'Pomodoro timer' : 'Focus timer';
+    const modeDescription = stopwatchMode
+      ? 'Use a simple count-up timer for open-ended work.'
+      : featured ? 'Choose a sprint and stay with one thing.' : 'Give one thing your full attention.';
+    return `<section class="card timer-card${featured ? ' timer-card-featured' : ''}${stopwatchMode ? ' is-stopwatch-mode' : ''}" aria-labelledby="focus-timer-title">
+      <div class="card-header"><div class="card-heading"><span class="card-heading-icon timer-heading-icon">${icon(stopwatchMode ? 'stopwatch' : 'clock', 18)}</span><div class="card-heading-copy"><h2 id="focus-timer-title">${heading}</h2><p>${modeDescription}</p></div></div><span class="timer-live-label${running ? ' is-running' : ''}">${statusLabel}</span></div>
+      ${modeSwitch}
+      ${readout}
+      ${progressTrack}
+      ${presets}
+      <div class="timer-controls"><button id="focus-timer-toggle" class="button button-primary button-small" type="button" data-action="timer-toggle">${icon(running ? 'pause' : 'play', 14)} ${toggleLabel}</button><button class="button button-secondary button-small" type="button" data-action="timer-reset">Reset</button></div>
+      ${featured ? renderPwaPomodoroNotificationControl() : ''}
       ${featured ? '' : `<div class="timer-open-link"><span>Your focus rhythm lives in Pomodoro.</span><button class="button-link" type="button" data-view="pomodoro">Open Pomodoro ${icon('arrow', 12)}</button></div>`}
     </section>`;
   }
@@ -1672,7 +1910,7 @@
     const bestDay = series.reduce((best, day) => day.sessions > (best?.sessions || 0) ? day : best, null);
     const bestSessions = bestDay?.sessions || 0;
     const bestDayLabel = bestSessions ? formatDate(bestDay.date, { month: 'short', day: 'numeric' }) : 'No best day yet';
-    return `<div class="pomodoro-view"><header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">ONE SPRINT AT A TIME</p><h1>Make room for<br/><span>deep focus.</span></h1><p>Choose a session length, focus on one thing, and let every completed Pomodoro build your rhythm.</p></div></header><section class="stats-grid pomodoro-stats" aria-label="Pomodoro summary">${renderStatCard('Completed sessions', String(total), 'total', `In the last ${pomodoroRangeDays} days`, 'check-circle', 'violet')}${renderStatCard('Today', String(todaySessions), 'sessions', 'Completed focus blocks', 'clock', 'blue')}${renderStatCard('Active days', String(activeDays), `of ${pomodoroRangeDays}`, 'At least one session', 'calendar', 'lime')}${renderStatCard('Best day', String(bestSessions), 'sessions', bestDayLabel, 'flame', 'amber')}</section><div class="pomodoro-layout"><div class="pomodoro-main-column">${renderFocusTimerCard(true)}${renderPomodoroChart(series, pomodoroRangeDays)}</div><aside class="pomodoro-aside"><section class="card pomodoro-guide-card"><div class="card-heading"><span class="card-heading-icon pomodoro-chart-icon">${icon('sparkles', 18)}</span><div class="card-heading-copy"><h2>A gentle focus flow</h2><p>Make the next sprint feel doable.</p></div></div><ol class="pomodoro-steps"><li><span>01</span><div><strong>Choose a length</strong><small>Pick 15, 25, or 45 minutes.</small></div></li><li><span>02</span><div><strong>Focus on one thing</strong><small>Keep the next step small and clear.</small></div></li><li><span>03</span><div><strong>Finish, then reset</strong><small>Completed sessions add to your graph.</small></div></li></ol><div class="pomodoro-note">${icon('lightbulb', 14)}<span>Pausing is okay. Only a finished timer counts as a completed session.</span></div></section><section class="card pomodoro-quiet-card"><span class="pomodoro-quiet-icon">${icon('moon', 18)}</span><h2>Progress, not pressure.</h2><p>Your chart shows focus sessions, not a score. A short, intentional sprint is a win.</p></section></aside></div><p class="page-footnote">Your focus history stays private in this browser, alongside the rest of your Daymark data.</p></div>`;
+    return `<div class="pomodoro-view"><header class="page-intro"><div class="page-intro-copy"><p class="eyebrow">ONE SPRINT AT A TIME</p><h1>Make room for<br/><span>deep focus.</span></h1><p>Choose a timed Pomodoro sprint or switch to a simple stopwatch for open-ended focus.</p></div></header><section class="stats-grid pomodoro-stats" aria-label="Pomodoro summary">${renderStatCard('Completed sessions', String(total), 'total', `In the last ${pomodoroRangeDays} days`, 'check-circle', 'violet')}${renderStatCard('Today', String(todaySessions), 'sessions', 'Completed focus blocks', 'clock', 'blue')}${renderStatCard('Active days', String(activeDays), `of ${pomodoroRangeDays}`, 'At least one session', 'calendar', 'lime')}${renderStatCard('Best day', String(bestSessions), 'sessions', bestDayLabel, 'flame', 'amber')}</section><div class="pomodoro-layout"><div class="pomodoro-main-column">${renderFocusTimerCard(true)}${renderPomodoroChart(series, pomodoroRangeDays)}</div><aside class="pomodoro-aside"><section class="card pomodoro-guide-card"><div class="card-heading"><span class="card-heading-icon pomodoro-chart-icon">${icon('sparkles', 18)}</span><div class="card-heading-copy"><h2>A gentle focus flow</h2><p>Make the next sprint feel doable.</p></div></div><ol class="pomodoro-steps"><li><span>01</span><div><strong>Choose a mode</strong><small>Pick a Pomodoro sprint or the stopwatch.</small></div></li><li><span>02</span><div><strong>Focus on one thing</strong><small>Keep the next step small and clear.</small></div></li><li><span>03</span><div><strong>Finish, then reset</strong><small>Completed sessions add to your graph.</small></div></li></ol><div class="pomodoro-note">${icon('lightbulb', 14)}<span>Pausing is okay. Only a finished timer counts as a completed session.</span></div></section><section class="card pomodoro-quiet-card"><span class="pomodoro-quiet-icon">${icon('moon', 18)}</span><h2>Progress, not pressure.</h2><p>Your chart shows focus sessions, not a score. A short, intentional sprint is a win.</p></section></aside></div><p class="page-footnote">Your completed Pomodoro-session history syncs securely with your Daymark account.</p></div>`;
   }
 
   function renderMoodCard() {
@@ -2079,15 +2317,55 @@
     showToast(`${challenge.name} is yours. Day one starts now.`);
   }
 
+  function stopTimerTicker() {
+    if (timerTicker) window.clearInterval(timerTicker);
+    timerTicker = null;
+  }
+
   function startTimerTicker() {
     if (timerTicker || !state.timer.endsAt) return;
     timerTicker = window.setInterval(() => {
       if (state.timer.endsAt) updateFocusTimer();
-      else {
-        window.clearInterval(timerTicker);
-        timerTicker = null;
-      }
+      else stopTimerTicker();
     }, 1000);
+  }
+
+  function stopStopwatchTicker() {
+    if (stopwatchTicker) window.clearInterval(stopwatchTicker);
+    stopwatchTicker = null;
+  }
+
+  function updateStopwatchDisplay() {
+    const display = document.getElementById('stopwatch-time');
+    if (display) display.textContent = formatStopwatch(getStopwatchElapsed());
+    if (!isStopwatchRunning()) stopStopwatchTicker();
+  }
+
+  function startStopwatchTicker() {
+    if (stopwatchTicker || !isStopwatchRunning()) return;
+    updateStopwatchDisplay();
+    stopwatchTicker = window.setInterval(updateStopwatchDisplay, 250);
+  }
+
+  function syncPwaPomodoroNotificationOnRender() {
+    if (!authUser || !isInstalledPwa() || !arePwaPomodoroNotificationsEnabled()) return;
+    if (state.timer.mode !== 'pomodoro') {
+      if (lastPwaPomodoroMode !== 'stopwatch') {
+        lastPwaPomodoroMode = 'stopwatch';
+        lastPomodoroNotificationMinute = null;
+        lastPomodoroNotificationStatus = '';
+        void closePwaPomodoroNotifications(false);
+      }
+      return;
+    }
+    lastPwaPomodoroMode = 'pomodoro';
+    if (isTimerRunning()) {
+      void updatePwaPomodoroLiveNotification(getTimerRemaining(), 'running');
+      return;
+    }
+    if (state.timer.remaining > 0 && state.timer.remaining < state.timer.duration) {
+      void updatePwaPomodoroLiveNotification(state.timer.remaining, 'paused');
+    }
   }
 
   function updateFocusTimer() {
@@ -2098,10 +2376,12 @@
       state.timer.remaining = 0;
       const key = getTodayKey();
       state.sessions[key] = (state.sessions[key] || 0) + 1;
-      if (timerTicker) window.clearInterval(timerTicker);
-      timerTicker = null;
+      stopTimerTicker();
+      lastPomodoroNotificationMinute = null;
+      lastPomodoroNotificationStatus = '';
       saveState();
       renderApp();
+      void showPwaPomodoroFinishedNotification();
       showToast('Focus session complete. Take a breath and enjoy the win.');
       return;
     }
@@ -2114,6 +2394,7 @@
     if (fill) fill.style.width = `${progress}%`;
     if (track) track.setAttribute('aria-valuenow', String(progress));
     if (status) status.textContent = 'Stay with one thing. You have got this.';
+    void updatePwaPomodoroLiveNotification(remaining, 'running');
   }
 
   function settleElapsedFocusTimer() {
@@ -2126,11 +2407,14 @@
       state.timer.remaining = getTimerRemaining();
       state.timer.endsAt = null;
       saveState();
+      void updatePwaPomodoroLiveNotification(state.timer.remaining, 'paused', true);
       renderApp();
       return;
     }
     if (getTimerRemaining() <= 0) state.timer.remaining = state.timer.duration;
     state.timer.endsAt = Date.now() + state.timer.remaining * 1000;
+    lastPomodoroNotificationMinute = null;
+    lastPomodoroNotificationStatus = '';
     saveState();
     renderApp();
     startTimerTicker();
@@ -2140,7 +2424,10 @@
     settleElapsedFocusTimer();
     state.timer.endsAt = null;
     state.timer.remaining = state.timer.duration;
+    lastPomodoroNotificationMinute = null;
+    lastPomodoroNotificationStatus = '';
     saveState();
+    void closePwaPomodoroNotifications();
     renderApp();
   }
 
@@ -2148,10 +2435,50 @@
     const duration = Number(minutes) * 60;
     if (!TIMER_PRESETS.includes(Number(minutes))) return;
     settleElapsedFocusTimer();
-    if (isTimerRunning()) return;
+    if (isFocusTimerRunning()) return;
     state.timer.duration = duration;
     state.timer.remaining = duration;
     state.timer.endsAt = null;
+    lastPomodoroNotificationMinute = null;
+    lastPomodoroNotificationStatus = '';
+    saveState();
+    renderApp();
+  }
+
+  function toggleStopwatch() {
+    const stopwatch = state.timer.stopwatch || (state.timer.stopwatch = { elapsed: 0, startedAt: null });
+    if (isStopwatchRunning()) {
+      stopwatch.elapsed = getStopwatchElapsed();
+      stopwatch.startedAt = null;
+      stopStopwatchTicker();
+    } else {
+      stopwatch.startedAt = Date.now();
+      startStopwatchTicker();
+    }
+    saveState();
+    renderApp();
+    if (isStopwatchRunning()) startStopwatchTicker();
+  }
+
+  function resetStopwatch() {
+    stopStopwatchTicker();
+    state.timer.stopwatch = { elapsed: 0, startedAt: null };
+    saveState();
+    renderApp();
+  }
+
+  function selectTimerMode(mode) {
+    if (!['pomodoro', 'stopwatch'].includes(mode) || mode === state.timer.mode) return;
+    if (isFocusTimerRunning()) {
+      showToast('Pause the running timer before switching modes.');
+      return;
+    }
+    state.timer.mode = mode;
+    if (mode === 'stopwatch') {
+      lastPomodoroNotificationMinute = null;
+      lastPomodoroNotificationStatus = '';
+      void closePwaPomodoroNotifications(false);
+    }
     saveState();
     renderApp();
   }
@@ -2297,13 +2624,21 @@
         break;
       }
       case 'timer-toggle':
-        toggleFocusTimer();
+        if (state.timer.mode === 'stopwatch') toggleStopwatch();
+        else toggleFocusTimer();
         break;
       case 'timer-reset':
-        resetFocusTimer();
+        if (state.timer.mode === 'stopwatch') resetStopwatch();
+        else resetFocusTimer();
         break;
       case 'timer-preset':
         setFocusTimerPreset(actionElement.dataset.minutes);
+        break;
+      case 'timer-mode':
+        selectTimerMode(actionElement.dataset.mode);
+        break;
+      case 'toggle-pomodoro-notifications':
+        void togglePwaPomodoroNotifications();
         break;
       case 'select-mood':
         selectMood(id, actionElement.dataset.day);
@@ -2337,16 +2672,23 @@
         reflectionDraft = '';
         state.timer.endsAt = null;
         state.timer.remaining = state.timer.duration;
-        if (timerTicker) window.clearInterval(timerTicker);
-        timerTicker = null;
+        state.timer.stopwatch = { elapsed: 0, startedAt: null };
+        stopTimerTicker();
+        stopStopwatchTicker();
+        lastPomodoroNotificationMinute = null;
+        lastPomodoroNotificationStatus = '';
+        void closePwaPomodoroNotifications();
         saveState();
         renderApp();
         showToast('Your activity has been cleared. Your habits are still here.');
         break;
       case 'reset-all':
         if (!window.confirm('Start fresh with an empty habit list and erase all saved progress in your Daymark account? You can choose suggestions later.')) return;
-        if (timerTicker) window.clearInterval(timerTicker);
-        timerTicker = null;
+        stopTimerTicker();
+        stopStopwatchTicker();
+        lastPomodoroNotificationMinute = null;
+        lastPomodoroNotificationStatus = '';
+        void closePwaPomodoroNotifications();
         state = makeDefaultState();
         currentView = 'today';
         editingFocus = false;
@@ -2579,9 +2921,18 @@
     cloudSyncStatus = 'offline';
     updateCloudSyncIndicator();
   });
-  window.addEventListener('focus', syncPwaHabitReminders);
+  window.addEventListener('focus', () => {
+    syncPwaHabitReminders();
+    if (state.timer.endsAt) updateFocusTimer();
+    if (isStopwatchRunning()) updateStopwatchDisplay();
+    syncPwaPomodoroNotificationOnRender();
+  });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) syncPwaHabitReminders();
+    if (document.hidden) return;
+    syncPwaHabitReminders();
+    if (state.timer.endsAt) updateFocusTimer();
+    if (isStopwatchRunning()) updateStopwatchDisplay();
+    syncPwaPomodoroNotificationOnRender();
   });
   if (navigator.serviceWorker) {
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -2600,4 +2951,5 @@
   else renderApp();
   scheduleDayChangeCheck();
   if (state.timer.endsAt) startTimerTicker();
+  if (isStopwatchRunning()) startStopwatchTicker();
 })();
