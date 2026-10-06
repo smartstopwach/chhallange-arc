@@ -32,6 +32,8 @@ function authErrorMessage(error) {
   if (code === 'auth/popup-blocked') return 'Your browser blocked the sign-in window. Allow pop-ups for this site, or try again on your phone.';
   if (code === 'auth/popup-closed-by-user') return 'The Google sign-in window was closed before sign-in finished.';
   if (code === 'auth/network-request-failed') return 'Sign-in needs an internet connection. Please reconnect and try again.';
+  if (code === 'auth/web-storage-unsupported') return 'This browser is blocking sign-in storage. Allow site data/cookies for Daymark and try again.';
+  if (code === 'auth/operation-not-supported-in-this-environment') return 'This browser could not open Google sign-in. Reopen Daymark in Chrome or Safari and try again.';
   if (code === 'auth/operation-not-allowed') return 'Google sign-in is not enabled for this Firebase project yet.';
   return 'Google sign-in could not be completed. Please try again.';
 }
@@ -46,6 +48,17 @@ async function initializeDaymarkFirebase() {
 
     const app = appSdk.initializeApp(firebaseConfig);
     const auth = authSdk.getAuth(app);
+    try {
+      // Keep Google sign-in across redirects and installed-PWA restarts.
+      await authSdk.setPersistence(auth, authSdk.browserLocalPersistence);
+    } catch (error) {
+      console.warn('Daymark could not use local sign-in persistence; trying session persistence.', error);
+      try {
+        await authSdk.setPersistence(auth, authSdk.browserSessionPersistence);
+      } catch (sessionError) {
+        console.warn('Daymark could not persist sign-in in this browser.', sessionError);
+      }
+    }
     let db;
     try {
       db = firestoreSdk.initializeFirestore(app, {
@@ -80,14 +93,18 @@ async function initializeDaymarkFirebase() {
         provider.setCustomParameters({ prompt: 'select_account' });
         const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
           || (navigator.maxTouchPoints > 1 && window.matchMedia('(max-width: 900px)').matches);
-        if (mobile) {
+        const installedPwa = window.matchMedia('(display-mode: standalone)').matches
+          || navigator.standalone === true;
+        // A popup avoids the cross-site redirect storage path in installed PWAs.
+        // Keep the redirect-first flow for ordinary mobile browser tabs.
+        if (mobile && !installedPwa) {
           await authSdk.signInWithRedirect(auth, provider);
           return;
         }
         try {
           await authSdk.signInWithPopup(auth, provider);
         } catch (error) {
-          if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) {
+          if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(error?.code)) {
             await authSdk.signInWithRedirect(auth, provider);
             return;
           }
@@ -150,15 +167,32 @@ async function initializeDaymarkFirebase() {
     };
     window.dispatchEvent(new Event('daymark:firebase-ready'));
 
-    authSdk.onAuthStateChanged(auth, (user) => {
+    let redirectResultResolved = false;
+    let observedUser = auth.currentUser;
+    const publishAuthState = (user) => {
       const detail = { initialized: true, user: userSummary(user) };
       window.DaymarkFirebaseState = detail;
       emit('daymark:auth-state', detail);
+    };
+
+    authSdk.onAuthStateChanged(auth, (user) => {
+      observedUser = user;
+      // Hold the initial signed-out state until Firebase checks a pending OAuth redirect.
+      if (user || redirectResultResolved) publishAuthState(user);
     }, (error) => {
+      redirectResultResolved = true;
+      publishAuthState(auth.currentUser || observedUser);
       emit('daymark:auth-error', { code: error?.code, message: authErrorMessage(error) });
     });
 
-    authSdk.getRedirectResult(auth).catch((error) => {
+    authSdk.getRedirectResult(auth).then((result) => {
+      redirectResultResolved = true;
+      // Explicitly publish the redirect user as well as listening for auth-state
+      // changes, so a PWA does not stay on the sign-in gate if that event is late.
+      publishAuthState(result?.user || auth.currentUser || observedUser);
+    }).catch((error) => {
+      redirectResultResolved = true;
+      publishAuthState(auth.currentUser || observedUser);
       emit('daymark:auth-error', { code: error?.code, message: authErrorMessage(error) });
     });
   } catch (error) {

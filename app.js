@@ -7,6 +7,7 @@
   let authInitialized = false;
   let authUser = null;
   let authMessage = '';
+  let googleSignInPending = false;
   let activeSyncUid = '';
   let cloudSyncUnsubscribe = null;
   let cloudSaveTimer = null;
@@ -944,6 +945,7 @@
     authInitialized = true;
     const incomingUser = detail.user || null;
     authMessage = '';
+    if (incomingUser?.uid) googleSignInPending = false;
     if (!incomingUser?.uid) {
       if (authUser) {
         stopCloudSync();
@@ -996,19 +998,22 @@
   }
 
   function handleFirebaseAuthError(detail = {}) {
+    googleSignInPending = false;
     authMessage = String(detail.message || 'Google sign-in could not be completed. Please try again.');
     if (authUser) showToast(authMessage);
     else renderApp();
   }
 
   function beginGoogleSignIn() {
+    if (googleSignInPending) return;
     authMessage = '';
-    renderApp();
     if (!window.DaymarkFirebase?.signInWithGoogle) {
       authMessage = 'Secure sign-in is still loading. Check your connection and try again.';
       renderApp();
       return;
     }
+    googleSignInPending = true;
+    renderApp();
     window.DaymarkFirebase.signInWithGoogle().catch((error) => {
       handleFirebaseAuthError({ message: error?.daymarkMessage || 'Google sign-in could not be completed. Please try again.' });
     });
@@ -1301,7 +1306,7 @@
     const message = authMessage || (firebaseReady
       ? 'Your habits and progress sync securely to your Google account.'
       : 'Secure sign-in could not load. Check your connection and reload the page.');
-    return `<main class="auth-gate"><div class="auth-glow auth-glow-one" aria-hidden="true"></div><div class="auth-glow auth-glow-two" aria-hidden="true"></div><section class="auth-panel" aria-labelledby="auth-title"><a class="auth-brand" href="#" aria-label="Daymark"><span class="brand-mark auth-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><span>daymark<span>.</span></span></a><p class="auth-eyebrow">A CALMER WAY TO SHOW UP</p><h1 id="auth-title">Make room for<br/><span>what matters.</span></h1><p class="auth-description">Your routines, reflections, and focus sessions—together in one quiet space, ready wherever you sign in.</p><button class="button button-primary auth-google-button" type="button" data-action="google-sign-in"${firebaseReady ? '' : ' disabled'}><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11c-.5 2.5-1.9 4.6-4 6v5.1h6.5c3.8-3.5 6.1-8.6 6.1-14.8Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.8L31 34.1c-1.8 1.2-4.1 2-7 2-5.3 0-9.8-3.6-11.4-8.4H5.9V33C9.3 39.6 16.1 44 24 44Z"/><path fill="#FBBC05" d="M12.6 27.7a12 12 0 0 1 0-7.4V15H5.9a20 20 0 0 0 0 17.9l6.7-5.2Z"/><path fill="#EA4335" d="M24 11.9c3 0 5.7 1 7.8 3.1l5.9-5.9C34.1 5.8 29.5 4 24 4 16.1 4 9.3 8.4 5.9 15l6.7 5.2c1.6-4.8 6.1-8.3 11.4-8.3Z"/></svg><span>Continue with Google</span></button><p class="auth-feedback${authMessage ? ' is-error' : ''}" role="status" aria-live="polite">${escapeHtml(message)}</p><div class="auth-security-note"><span class="auth-lock-icon">${icon('lock', 15)}</span><span>Private by design. Only you can access your Daymark data.</span></div><div class="auth-divider"><span></span><small>YOUR DAY, YOUR PACE</small><span></span></div><p class="auth-footnote">Sign-in is required to keep your workspace in sync across devices. We never post on your behalf.</p></section><footer class="auth-footer">A little progress, every day. <span>© Daymark</span></footer></main>`;
+    return `<main class="auth-gate"><div class="auth-glow auth-glow-one" aria-hidden="true"></div><div class="auth-glow auth-glow-two" aria-hidden="true"></div><section class="auth-panel" aria-labelledby="auth-title"><a class="auth-brand" href="#" aria-label="Daymark"><span class="brand-mark auth-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><span>daymark<span>.</span></span></a><p class="auth-eyebrow">A CALMER WAY TO SHOW UP</p><h1 id="auth-title">Make room for<br/><span>what matters.</span></h1><p class="auth-description">Your routines, reflections, and focus sessions—together in one quiet space, ready wherever you sign in.</p><button class="button button-primary auth-google-button" type="button" data-action="google-sign-in"${firebaseReady && !googleSignInPending ? '' : ' disabled'}><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11c-.5 2.5-1.9 4.6-4 6v5.1h6.5c3.8-3.5 6.1-8.6 6.1-14.8Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.8L31 34.1c-1.8 1.2-4.1 2-7 2-5.3 0-9.8-3.6-11.4-8.4H5.9V33C9.3 39.6 16.1 44 24 44Z"/><path fill="#FBBC05" d="M12.6 27.7a12 12 0 0 1 0-7.4V15H5.9a20 20 0 0 0 0 17.9l6.7-5.2Z"/><path fill="#EA4335" d="M24 11.9c3 0 5.7 1 7.8 3.1l5.9-5.9C34.1 5.8 29.5 4 24 4 16.1 4 9.3 8.4 5.9 15l6.7 5.2c1.6-4.8 6.1-8.3 11.4-8.3Z"/></svg><span>${googleSignInPending ? 'Opening Google sign-in…' : 'Continue with Google'}</span></button><p class="auth-feedback${authMessage ? ' is-error' : ''}" role="status" aria-live="polite">${escapeHtml(message)}</p><div class="auth-security-note"><span class="auth-lock-icon">${icon('lock', 15)}</span><span>Private by design. Only you can access your Daymark data.</span></div><div class="auth-divider"><span></span><small>YOUR DAY, YOUR PACE</small><span></span></div><p class="auth-footnote">Sign-in is required to keep your workspace in sync across devices. We never post on your behalf.</p></section><footer class="auth-footer">A little progress, every day. <span>© Daymark</span></footer></main>`;
   }
 
   function renderNav() {
